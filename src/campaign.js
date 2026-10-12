@@ -75,19 +75,54 @@ const ROUTES = [
   { id: 'r1', place: 'Ruta 1', name: 'Joven Pepe', portrait: 'base1-77', level: 1, types: ['C', 'F'], sets: ['base1'], req: 0, x: 22, y: 70 },
   { id: 'vf', place: 'Bosque Verde', name: 'Cazabichos Tomás', portrait: 'base2-64', level: 1, types: ['G'], sets: ['base1', 'base2'], req: 0, x: 20, y: 44 },
   { id: 'mm', place: 'Monte Moon', name: 'Súper Nerd Miguel', portrait: 'base3-62', level: 2, types: ['F', 'W'], sets: ['base1', 'base3'], req: 1, x: 40, y: 18 },
-  { id: 'mm2', place: 'Monte Moon', name: 'Recluta Rocket', portrait: 'base5-71', level: 2, types: ['P', 'G'], sets: ['base5'], req: 1, x: 46, y: 24 },
   { id: 'r24', place: 'Puente Pepita', name: 'Chica Reli', portrait: 'base1-75', level: 2, types: ['W', 'C'], sets: ['base1', 'base2'], req: 1, x: 60, y: 8 },
   { id: 'ssa', place: 'S.S. Anne', name: 'Caballero Arturo', portrait: 'base1-91', level: 3, types: ['C', 'L'], sets: ['base1', 'base2', 'base4'], req: 2, x: 66, y: 72 },
   { id: 'pt', place: 'Torre Pokémon', name: 'Médium Patricia', portrait: 'base3-58', level: 3, types: ['P'], sets: ['base1', 'base3'], req: 3, x: 80, y: 40 },
   { id: 'r12', place: 'Ruta 12', name: 'Pescador Ned', portrait: 'base1-88', level: 3, types: ['W'], sets: ['base1', 'base2', 'base3', 'base4'], req: 3, x: 82, y: 62 },
   { id: 'r17', place: 'Ciclovía', name: 'Motorista Billy', portrait: 'base5-76', level: 3, types: ['G', 'R'], sets: ['base1', 'base3', 'base5'], req: 4, x: 30, y: 72 },
   { id: 'sz', place: 'Zona Safari', name: 'Guarda Jeremy', portrait: 'base1-76', level: 4, types: ['G', 'C'], sets: ['base2', 'gym1'], req: 4, x: 56, y: 90 },
-  { id: 'silph', place: 'Silph S.A.', name: 'Científico Rocket', portrait: 'base5-73', level: 4, types: ['L', 'P'], sets: ['base5', 'base3'], req: 5, x: 56, y: 36 },
   { id: 'sf', place: 'Islas Espuma', name: 'Nadadora Alicia', portrait: 'gym1-123', level: 4, types: ['W'], sets: ['base1', 'base2', 'base3', 'base4', 'gym1', 'gym2'], req: 5, x: 34, y: 92 },
   { id: 'pm', place: 'Mansión Pokémon', name: 'Ladrón Simón', portrait: 'base5-74', level: 4, types: ['R', 'P'], sets: ['base1', 'base3', 'base5', 'gym2'], req: 6, x: 14, y: 80 },
   { id: 'vr', place: 'Calle Victoria', name: 'Entrenador Guay Samuel', portrait: 'base1-71', level: 5, types: ['F', 'W', 'L'], sets: null, req: 8, x: 8, y: 30 },
   { id: 'vr2', place: 'Calle Victoria', name: 'Entrenadora Guay Julia', portrait: 'base1-89', level: 5, types: ['P', 'G', 'R'], sets: null, req: 8, x: 8, y: 20 },
 ];
+// entrenadores adicionales (se agrupan por lugar en el mapa)
+ROUTES.push(
+  { id: 'r22', place: 'Ruta 22', name: 'Rival Azul', portrait: 'base1-73', level: 1, types: ['W', 'C'], sets: ['base1'], req: 0, x: 9, y: 62, rival: true },
+  { id: 'r2', place: 'Ruta 2', name: 'Chica Ana', portrait: 'base1-75', level: 1, types: ['C', 'W'], sets: ['base1'], req: 0, x: 24, y: 50 },
+  { id: 'r1b', place: 'Ruta 1', name: 'Joven Toño', portrait: 'base1-91', level: 1, types: ['G', 'C'], sets: ['base1', 'base2'], req: 0 },
+  { id: 'vf2', place: 'Bosque Verde', name: 'Cazabichos Samuel', portrait: 'base2-64', level: 1, types: ['G'], sets: ['base1', 'base2', 'base4'], req: 0 },
+  { id: 'r3', place: 'Ruta 3', name: 'Joven Ben', portrait: 'base4-121', level: 1, types: ['F', 'C'], sets: ['base1', 'base2'], req: 1, x: 31, y: 24 },
+  { id: 'r3b', place: 'Ruta 3', name: 'Cazabichos Colin', portrait: 'base2-64', level: 2, types: ['G'], sets: ['base1', 'base2', 'base3'], req: 1 },
+  { id: 'r4', place: 'Monte Moon', name: 'Chica Lisa', portrait: 'base1-75', level: 2, types: ['P', 'C'], sets: ['base1', 'base2', 'base3'], req: 1 },
+  { id: 'r25', place: 'Puente Pepita', name: 'Pokémaníaco Mark', portrait: 'base1-87', level: 2, types: ['C', 'F'], sets: ['base2', 'base3'], req: 1 },
+  { id: 'r6', place: 'Ruta 6', name: 'Campista Ricardo', portrait: 'base4-123', level: 2, types: ['R', 'F'], sets: ['base1', 'base2', 'base4'], req: 2, x: 60, y: 51 },
+  { id: 'ssar', place: 'S.S. Anne', name: 'Rival Azul', portrait: 'base1-73', level: 3, types: ['W', 'G', 'C'], sets: ['base1', 'base2', 'base3', 'base4'], req: 2, rival: true },
+  { id: 'r9', place: 'Túnel Roca', name: 'Montañero Lenny', portrait: 'base3-60', level: 3, types: ['F'], sets: ['base1', 'base3', 'base4'], req: 3, x: 74, y: 22 },
+  { id: 'r9b', place: 'Túnel Roca', name: 'Montañero Alan', portrait: 'base3-62', level: 3, types: ['F', 'L'], sets: ['base1', 'base3'], req: 3 },
+  { id: 'r8', place: 'Ruta 8', name: 'Jugador Rich', portrait: 'base3-60', level: 3, types: ['L', 'C'], sets: ['base1', 'base2', 'base4'], req: 3, x: 67, y: 38 },
+  { id: 'r11', place: 'Ruta 11', name: 'Ingeniero Bernie', portrait: 'base1-87', level: 3, types: ['L', 'F'], sets: ['base1', 'base3', 'base4'], req: 3, x: 75, y: 57 },
+  { id: 'ptr', place: 'Torre Pokémon', name: 'Rival Azul', portrait: 'base1-73', level: 4, types: ['W', 'G', 'P'], sets: null, req: 4, rival: true },
+  { id: 'r13', place: 'Ruta 13', name: 'Ornitólogo Sebastián', portrait: 'base2-64', level: 4, types: ['C', 'L'], sets: ['base2', 'base3', 'gym1'], req: 4, x: 73, y: 79 },
+  { id: 'r14', place: 'Ruta 13', name: 'Motorista Lao', portrait: 'base5-75', level: 4, types: ['G', 'P'], sets: ['base1', 'base3', 'gym2'], req: 4 },
+  { id: 'r15', place: 'Ruta 15', name: 'Belleza Grace', portrait: 'gym1-110', level: 4, types: ['G', 'W'], sets: ['base2', 'base4', 'gym1'], req: 5, x: 64, y: 84 },
+  { id: 'pp', place: 'Central Eléctrica', name: 'Científico Taylor', portrait: 'base1-71', level: 4, types: ['L'], sets: ['base1', 'base3', 'base4', 'gym1', 'gym2'], req: 5, x: 88, y: 28 },
+  { id: 'r21', place: 'Islas Espuma', name: 'Pescador Ronald', portrait: 'base1-88', level: 4, types: ['W', 'P'], sets: ['base1', 'base3', 'gym2'], req: 6 },
+  { id: 'vr3', place: 'Calle Victoria', name: 'Entrenadora Guay Naomi', portrait: 'base1-76', level: 5, types: ['L', 'P', 'C'], sets: null, req: 8 },
+  { id: 'cc', place: 'Cueva Celeste', name: 'Cazador de Leyendas', portrait: 'gym2-116', level: 5, types: ['P', 'L', 'R', 'W'], sets: null, req: 8, x: 48, y: 7 },
+);
+// Team Rocket: cadena de combates en orden, sólo Pokémon Oscuros
+const ROCKET = [
+  { id: 'mm2', place: 'Monte Moon', name: 'Recluta Rocket', portrait: 'base5-71', level: 2, types: ['G', 'P'], req: 1, quote: '¡Este fósil es propiedad del Team Rocket!' },
+  { id: 'rk2', place: 'Puente Pepita', name: 'Recluta Rocket', portrait: 'base5-77', level: 2, types: ['C', 'F'], req: 1, quote: 'Ganaste el premio del puente... ¡ahora únete al Team Rocket!' },
+  { id: 'rk3', place: 'Escondite Rocket', name: 'Recluta Rocket', portrait: 'base5-78', level: 3, types: ['G', 'F'], req: 3, x: 44, y: 53, quote: 'Nadie entra en el Casino Rocket sin permiso.' },
+  { id: 'rk4', place: 'Escondite Rocket', name: 'Jessie y James', portrait: 'base5-15', level: 3, types: ['G', 'C'], req: 3, quote: '¡Prepárate para los problemas! ¡Y más vale que teman!' },
+  { id: 'rk5', place: 'Torre Pokémon', name: 'Butch y Cassidy', portrait: 'base5-72', level: 4, types: ['P', 'F'], req: 4, quote: 'Esta torre ahora pertenece al Team Rocket.' },
+  { id: 'silph', place: 'Silph S.A.', name: 'Admin Petrel', portrait: 'base5-76', level: 4, types: ['L', 'C'], req: 5, x: 56, y: 35, quote: 'La Master Ball de Silph será nuestra.' },
+  { id: 'rk7', place: 'Silph S.A.', name: 'Admin Ariana', portrait: 'base5-16', level: 5, types: ['W', 'P'], req: 5, quote: 'No llegarás hasta el Jefe.' },
+  { id: 'rkboss', place: 'Silph S.A.', name: 'Jefe Giovanni', portrait: 'base5-73', level: 5, types: ['R', 'W', 'P'], req: 6, perk: 'rocket', boss: true, quote: 'Así que eres tú quien ha estado arruinando mis planes. Te enseñaré el verdadero poder del Team Rocket.' },
+];
+PERKS.rocket = { name: 'Poder Oscuro', es: 'Sus Pokémon Oscuros hacen 10 de daño más (antes de Debilidad y Resistencia), pueden evolucionar el mismo turno en que entra el Básico, y juega con sólo 5 cartas de Premio.' };
 const LEAGUE = { id: 'league', place: 'Meseta Añil', name: 'Campeón Azul', portrait: 'base5-74', level: 5, req: 8, x: 8, y: 8, quote: '¡Por fin llegas! Soy el Campeón de la Liga Pokémon. ¡Te enseñaré quién manda!' };
 const STARTERS = [
   { id: 'overgrowth', name: 'Vegetación', desc: 'Planta y Agua: crecimiento constante y curación.', types: ['G', 'W'], cover: 'base1-44' },
@@ -104,9 +139,10 @@ function trainerDeck(t, rng, owner) {
 function starterDeck(st, rng) {
   return P.Decks.genDeck({ types: st.types, sets: ['base1'], level: 1, rng, colorless: false });
 }
+function rocketDeck(r, rng) { return P.Decks.genDarkDeck({ types: r.types, level: r.level, rng }); }
 function rivalDeck(rng) {
   const types = ['W', 'L', 'P', 'F', 'R', 'G'].sort(() => rng() - 0.5).slice(0, 2);
   return P.Decks.genDeck({ types, level: 5, rng, colorless: true });
 }
-P.Campaign = { SETS, PACKS, openPack, PERKS, GYMS, ROUTES, LEAGUE, STARTERS, leaderDeck, trainerDeck, starterDeck, rivalDeck };
+P.Campaign = { SETS, PACKS, openPack, PERKS, GYMS, ROUTES, ROCKET, rocketDeck, LEAGUE, STARTERS, leaderDeck, trainerDeck, starterDeck, rivalDeck };
 })(typeof window !== 'undefined' ? window : globalThis);

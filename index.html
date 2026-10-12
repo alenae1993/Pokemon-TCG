@@ -85,6 +85,11 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .node.lock { opacity: .5; cursor: not-allowed; }
 .node .lbl { font: 700 12px var(--f-cond); background: rgba(10,20,34,.85); padding: 1px 6px; border-radius: 6px; white-space: nowrap; color: var(--ink); }
 @media (max-width: 600px) { .node .lbl { display: none; } .node.gym .lbl { display: block; font-size: 10px; } .node .dot { width: 20px; height: 20px; font-size: 9px; border-width: 2px; } .node.gym .dot { width: 26px; height: 26px; } }
+.node.rocket .dot, .node.rocketonly .dot { background: #1c1c1c; border-color: #e23b3b; color: #ff4b4b; font-family: var(--f-display); }
+.node.rocketonly.done .dot { background: var(--green); border-color: #fff; color: #fff; }
+.rocket-head { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.rbadge { width: 26px; height: 26px; border-radius: 50%; background: #111; border: 2px solid #e23b3b; color: #ff4b4b; display: grid; place-items: center; font: 400 14px var(--f-display); }
+.opp-row.rk { background: linear-gradient(90deg, #2b1418, var(--panel2)); border: 1px solid #5a2020; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
 .hub { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; max-width: 1340px; margin: 0 auto; }
 @media (max-width: 900px) { .hub { grid-template-columns: 1fr; } }

@@ -89,5 +89,48 @@ function validate(deck, coll) {
   if (!deck.some(id => P.DB[id].st === 'P' && P.DB[id].stage === 0)) errs.push('Necesitas al menos un Pokémon Básico.');
   return errs;
 }
-P.Decks = { genDeck, lines, power, validate, ENERGY_ID };
+// Mazo del Team Rocket: sólo Pokémon Oscuros (más los Básicos de los que evolucionan, del set Team Rocket)
+function genDarkDeck(cfg) {
+  const rng = cfg.rng || Math.random; const lvl = cfg.level || 2;
+  const D = P.CARDS;
+  const darks = D.filter(d => d.st === 'P' && d.name.startsWith('Dark '));
+  const basicOf = name => D.find(d => d.set === 'base5' && d.name === name && d.st === 'P' && d.stage === 0) || D.find(d => d.name === name && d.st === 'P' && d.stage === 0);
+  const pickVer = list => lvl >= 4 ? (list.find(d => d.rar === 'RH') || list[0]) : (list.find(d => d.rar !== 'RH') || list[0]);
+  const s1names = [...new Set(darks.filter(d => d.stage === 1).map(d => d.name))];
+  const all = s1names.map(n => {
+    const s1 = pickVer(darks.filter(d => d.stage === 1 && d.name === n));
+    const s2c = darks.filter(d => d.stage === 2 && d.from === n);
+    return { basic: basicOf(s1.from), s1, s2: s2c.length ? pickVer(s2c) : null };
+  }).filter(l => l.basic);
+  const pref = cfg.types || [];
+  const STRONG = ['Dark Blastoise', 'Dark Dragonite', 'Dark Alakazam', 'Dark Charizard', 'Dark Golbat', 'Dark Gyarados', 'Dark Weezing', 'Dark Muk', 'Dark Vileplume', 'Dark Machamp', 'Dark Slowbro', 'Dark Hypno', 'Dark Raichu'];
+  const score = l => { const top = l.s2 || l.s1; let v = power(top) + rng() * 8; if (pref.some(t => top.types.includes(t))) v += 12; if (lvl >= 4 && STRONG.includes(top.name)) v += 10; return v; };
+  const s2lines = all.filter(l => l.s2).sort((a, b) => score(b) - score(a));
+  const s1lines = all.filter(l => !l.s2).sort((a, b) => score(b) - score(a));
+  // estructura según nivel
+  const plan = cfg.plan || (lvl <= 2 ? { s2: 0, s1: 4 } : { s2: 1, s1: 2 });
+  if (lvl >= 4 && cfg.lean === undefined) cfg.lean = true;
+  const chosen = s2lines.slice(0, plan.s2).concat(s1lines.slice(0, plan.s1));
+  const deck = []; const nc = {};
+  const add = (d, n) => { for (let k = 0; k < n; k++) { if ((nc[d.name] || 0) >= 4) return; nc[d.name] = (nc[d.name] || 0) + 1; deck.push(d.id); } };
+  for (const l of chosen) {
+    if (l.s2) { add(l.basic, 4); add(l.s1, 3); add(l.s2, lvl >= 4 ? 3 : 2); }
+    else { add(l.basic, lvl <= 2 ? 3 : 4); add(l.s1, 3); }
+  }
+  const T = [];
+  const push = (id, n) => { for (let k = 0; k < n; k++) T.push(id); };
+  if (lvl <= 2) { push('base5-73', 1); push('base5-72', 1); push('base5-71', 1); push('base5-74', 1); push('base5-79', 1); push('base1-91', 3); push('base1-94', 2); }
+  else if (lvl === 3) { push('base5-73', 2); push('base5-72', 1); push('base5-74', 1); push('base5-79', 1); push('base5-77', 1); push('base5-78', 1); push('base1-91', 4); push('base1-92', 1); push('base1-84', 1); push('base1-76', 1); }
+  else if (cfg.lean) { push('base5-73', 2); push('base1-91', 4); push('base1-76', plan.s2 ? 2 : 0); push('base1-93', 2); push('base1-84', 2); push('base1-92', 2); }
+  else { push('base5-73', 3); push('base5-79', 1); push('base5-76', 1); push('base1-91', 4); push('base1-88', 1); push('base1-71', 1); push('base1-76', 2); push('base1-93', 2); push('base1-84', 2); push('base1-92', 2); }
+  for (const id of T) { const d = P.DB[id]; if ((nc[d.name] || 0) < 4) { nc[d.name] = (nc[d.name] || 0) + 1; deck.push(id); } }
+  for (const id of (lvl >= 3 ? ['base5-80', 'base5-80', 'base5-81'] : ['base5-80', 'base5-82'])) deck.push(id);
+  const need = {}; for (const id of deck) { const d = P.DB[id]; if (d.st === 'P') for (const a of d.atk) for (const c of a.cost) if (c !== 'C') need[c] = (need[c] || 0) + 1; }
+  const types = Object.keys(need).filter(t => ENERGY_ID[t]); if (!types.length) types.push('P');
+  const tot = types.reduce((a, t) => a + need[t], 0); const left = 60 - deck.length; let placed = 0;
+  types.forEach((t, i) => { const n = i === types.length - 1 ? left - placed : Math.round(left * need[t] / tot); for (let k = 0; k < n; k++) deck.push(ENERGY_ID[t]); placed += n; });
+  while (deck.length < 60) deck.push(ENERGY_ID[types[0]]);
+  return deck.slice(0, 60);
+}
+P.Decks = { genDeck, genDarkDeck, lines, power, validate, ENERGY_ID };
 })(typeof window !== 'undefined' ? window : globalThis);

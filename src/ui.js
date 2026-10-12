@@ -205,7 +205,19 @@ function viewMap(v) {
   const badgeN = S.badges.length;
   const gymDone = id => S.badges.includes(id);
   C.GYMS.forEach((g, i) => nodes.push({ x: g.x, y: g.y, label: g.city, cls: 'gym' + (gymDone(g.id) ? ' done' : '') + (i > badgeN ? ' lock' : ''), txt: String(i + 1), on: () => i <= badgeN ? gymPanel(g, i) : toast(`Necesitas ${i} medalla(s) para entrar.`) }));
-  for (const r of C.ROUTES) nodes.push({ x: r.x, y: r.y, label: r.place, cls: (S.beaten[r.id] ? 'done' : '') + (badgeN < r.req ? ' lock' : ''), txt: '★'.repeat(Math.min(3, Math.ceil(r.level / 2))), on: () => badgeN >= r.req ? routePanel(r) : toast(`Disponible con ${r.req} medalla(s).`) });
+  // un punto por lugar (agrupa entrenadores de ruta y del Team Rocket)
+  const places = {};
+  for (const r of C.ROUTES.concat(C.ROCKET)) { const pl = places[r.place] || (places[r.place] = { place: r.place, list: [] }); pl.list.push(r); if (r.x != null && pl.x == null) { pl.x = r.x; pl.y = r.y; } }
+  for (const pl of Object.values(places)) {
+    if (pl.x == null) continue;
+    const minReq = Math.min(...pl.list.map(r => r.req));
+    const routes = pl.list.filter(r => !C.ROCKET.includes(r));
+    const rk = pl.list.filter(r => C.ROCKET.includes(r));
+    const rkOpen = rk.some(r => rocketOpen(r) && !S.beaten[r.id]);
+    const allDone = pl.list.every(r => S.beaten[r.id]);
+    const maxLv = Math.max(...pl.list.map(r => r.level));
+    nodes.push({ x: pl.x, y: pl.y, label: pl.place + (pl.list.length > 1 ? ` (${pl.list.length})` : ''), cls: (allDone ? 'done' : '') + (badgeN < minReq ? ' lock' : '') + (rkOpen ? ' rocket' : '') + (!routes.length ? ' rocketonly' : ''), txt: rkOpen || !routes.length ? 'R' : '★'.repeat(Math.min(3, Math.ceil(maxLv / 2))), on: () => badgeN >= minReq ? placePanel(pl.place) : toast(`Disponible con ${minReq} medalla(s).`) });
+  }
   const L = C.LEAGUE; nodes.push({ x: L.x, y: L.y, label: L.place, cls: 'gym' + (S.champion ? ' done' : '') + (badgeN < 8 ? ' lock' : ''), txt: '👑', on: () => badgeN >= 8 ? leaguePanel() : toast('Consigue las 8 medallas para entrar en la Liga.') });
   nodes.push({ x: 31, y: 81, label: 'Pueblo Paleta', cls: 'done', txt: '⌂', on: () => { curView = 'shop'; renderTop(); renderView(); } });
   for (const n of nodes) map.append(el('button', { class: 'node ' + n.cls, style: `left:${n.x}%;top:${n.y}%`, onclick: n.on, 'aria-label': n.label }, el('span', { class: 'dot' }, n.txt), el('span', { class: 'lbl' }, n.label)));
@@ -231,13 +243,32 @@ function gymPanel(g, i) {
   side.append(el('div', { class: 'pw', style: 'margin-top:10px;background:#2a1f3d;border-left:3px solid var(--gold);padding:8px;border-radius:6px' }, el('b', {}, `Ventaja del líder: ${perk.name}`), el('div', { style: 'font-size:13px' }, perk.es)));
   side.append(el('p', { class: 'muted', style: 'font-style:italic;font-size:13px' }, `«${g.quote}»`));
 }
-function routePanel(r) {
+function rocketOpen(r) { const i = C.ROCKET.indexOf(r); return S.badges.length >= r.req && (i === 0 || !!S.beaten[C.ROCKET[i - 1].id]); }
+function rocketProgress() { return C.ROCKET.filter(r => S.beaten[r.id]).length; }
+function placePanel(place) {
   const side = $('#mapside'); side.innerHTML = '';
-  side.append(el('h2', { class: 'cond', style: 'font-size:22px;color:var(--gold)' }, r.place));
-  const same = C.ROUTES.filter(x => x.place === r.place);
-  for (const x of same) side.append(oppRow(x, () => preBattle({ kind: 'route', t: x }), (S.beaten[x.id] ? `✔ Vencido ${S.beaten[x.id]} vez/veces` : 'Primera victoria: sobre de regalo') + (x.sets ? ' · Sets: ' + x.sets.map(s => SETNAME[s]).join(', ') : ' · Todos los sets')));
-  side.append(el('p', { class: 'muted', style: 'font-size:13px' }, 'Los entrenadores de ruta pueden desafiarse cuantas veces quieras para ganar Pokédólares.'));
+  side.append(el('h2', { class: 'cond', style: 'font-size:22px;color:var(--gold)' }, place));
+  const badgeN = S.badges.length;
+  const routes = C.ROUTES.filter(x => x.place === place);
+  for (const x of routes) {
+    if (badgeN < x.req) { side.append(el('div', { class: 'opp-row', style: 'opacity:.5' }, el('div', { class: 'info' }, el('b', {}, x.name), ` · 🔒 con ${x.req} medalla(s)`))); continue; }
+    side.append(oppRow(x, () => preBattle({ kind: 'route', t: x }), (x.rival ? '⚔️ Tu rival · ' : '') + (S.beaten[x.id] ? `✔ Vencido ${S.beaten[x.id]} vez/veces` : 'Primera victoria: sobre de regalo') + (x.sets ? ' · Sets: ' + x.sets.map(s => SETNAME[s]).join(', ') : ' · Todos los sets')));
+  }
+  const rk = C.ROCKET.filter(x => x.place === place);
+  if (rk.length) {
+    side.append(el('div', { class: 'rocket-head' }, el('span', { class: 'rbadge' }, 'R'), el('b', {}, 'Team Rocket'), el('span', { class: 'muted', style: 'font-size:12.5px' }, `Misión ${rocketProgress()}/${C.ROCKET.length} · sólo Pokémon Oscuros`)));
+    for (const x of rk) {
+      const i = C.ROCKET.indexOf(x);
+      if (!rocketOpen(x)) { const prev = C.ROCKET[i - 1]; side.append(el('div', { class: 'opp-row rk', style: 'opacity:.55' }, el('div', { class: 'info' }, el('b', {}, x.name), el('div', { class: 'muted', style: 'font-size:12.5px' }, badgeN < x.req ? `🔒 Requiere ${x.req} medalla(s)` : `🔒 Primero vence a ${prev.name} (${prev.place})`)))); continue; }
+      const row = oppRow(Object.assign({}, x), () => preBattle({ kind: 'rocket', t: x }), (x.boss ? '👑 Jefe del Team Rocket · ' : '') + (S.beaten[x.id] ? `✔ Vencido ${S.beaten[x.id]} vez/veces` : 'Primera victoria: sobres de Team Rocket'));
+      row.classList.add('rk'); side.append(row);
+      if (x.quote && !S.beaten[x.id]) side.append(el('p', { class: 'muted', style: 'font-style:italic;font-size:12.5px;margin:4px 0 0' }, `«${x.quote}»`));
+    }
+    if (rk.some(x => x.perk)) side.append(el('div', { class: 'pw', style: 'margin-top:10px;background:#2b1418;border-left:3px solid var(--red);padding:8px;border-radius:6px' }, el('b', {}, 'Ventaja del Jefe: ' + C.PERKS.rocket.name), el('div', { style: 'font-size:13px' }, C.PERKS.rocket.es)));
+  }
+  if (routes.length) side.append(el('p', { class: 'muted', style: 'font-size:13px' }, 'Los entrenadores de ruta pueden desafiarse cuantas veces quieras para ganar Pokédólares.'));
 }
+function routePanel(r) { placePanel(r.place); }
 function leaguePanel() {
   const side = $('#mapside'); side.innerHTML = ''; const L = C.LEAGUE;
   side.append(el('h2', { class: 'cond', style: 'font-size:22px;color:var(--gold)' }, 'Meseta Añil — Liga Pokémon'));
@@ -437,6 +468,7 @@ function preBattle(spec) {
   if (spec.kind === 'route') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: spec.t.id };
   else if (spec.kind === 'gymTrainer') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: 'g_' + spec.gym.id + '_' + spec.idx };
   else if (spec.kind === 'leader') opp = { name: 'Líder ' + spec.gym.leader, portrait: spec.gym.portrait, level: spec.gym.level, deck: C.leaderDeck(spec.gym, rng), perk: spec.gym.perk, key: 'L_' + spec.gym.id };
+  else if (spec.kind === 'rocket') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.rocketDeck(spec.t, rng), perk: spec.t.perk, key: spec.t.id, rocket: true };
   else opp = { name: spec.t.name, portrait: spec.t.portrait, level: 5, deck: C.rivalDeck(rng), key: 'league' };
   spec.opp = opp;
   const body = el('div', { style: 'display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start' });
@@ -461,7 +493,7 @@ function startBattle(spec, myDeck) {
   $('#battle').hidden = false; $('#log').innerHTML = '';
   BT.spec = spec; BT.sel = null; BT.ask = null;
   const opp = spec.opp;
-  const aiLvl = Math.min(3, Math.max(1, Math.ceil(opp.level / 2) + (spec.kind === 'leader' || spec.kind === 'league' ? 1 : 0)));
+  const aiLvl = Math.min(3, Math.max(1, Math.ceil(opp.level / 2) + (spec.kind === 'leader' || spec.kind === 'league' || (spec.t && (spec.t.boss || spec.t.rival)) ? 1 : 0)));
   const g = new P.Game({ ai: P.AI, players: [{ name: S.name, deck: myDeck.slice(), coin: S.coin }, { name: opp.name, deck: opp.deck, ai: { level: aiLvl }, perk: opp.perk, coin: Math.floor(Math.random() * COIN_COUNT) }], io: IO });
   g.portrait = opp.portrait;
   BT.g = g; render();
@@ -785,13 +817,18 @@ function endBattle(w) {
     S.stats.wins++; S.beaten[opp.key] = (S.beaten[opp.key] || 0) + 1;
     const unlocked = C.SETS.filter(s => S.badges.length >= s.unlock).map(s => s.id);
     const gymSet = spec.gym ? (C.GYMS.indexOf(spec.gym) < 4 ? 'gym1' : 'gym2') : null;
-    if (spec.kind === 'route') { money = firstTime ? 60 + 50 * opp.level : 30 + 30 * opp.level; if (firstTime) { const s = unlocked[Math.floor(Math.random() * unlocked.length)]; packs[s] = 1; } }
+    if (spec.kind === 'rocket') {
+      money = firstTime ? 80 * opp.level + (spec.t.boss ? 1200 : 0) : 35 * opp.level; if (firstTime) packs.base5 = spec.t.boss ? 4 : (opp.level >= 4 ? 2 : 1);
+      if (firstTime && spec.t.boss) rewards.push({ txt: '¡Derrotaste al Team Rocket! Giovanni se retira... por ahora.' });
+      else if (firstTime) { const nx = C.ROCKET[C.ROCKET.indexOf(spec.t) + 1]; if (nx) rewards.push({ txt: `El Team Rocket huye hacia ${nx.place}...` }); }
+    }
+    else if (spec.kind === 'route') { money = firstTime ? 60 + 50 * opp.level : 30 + 30 * opp.level; if (firstTime) { const s = unlocked[Math.floor(Math.random() * unlocked.length)]; packs[s] = 1; } }
     else if (spec.kind === 'gymTrainer') { money = firstTime ? 90 * opp.level : 40 * opp.level; if (firstTime) packs[gymSet] = 1; }
     else if (spec.kind === 'leader') {
       const g = spec.gym; money = S.badges.includes(g.id) ? 250 : 600; packs[gymSet] = S.badges.includes(g.id) ? 1 : 3;
       if (!S.badges.includes(g.id)) { S.badges.push(g.id); rewards.push({ badge: g.badge, txt: `¡Obtuviste la ${g.badgeEs}!` }); const ns = C.SETS.find(s => s.unlock === S.badges.length); if (ns) rewards.push({ txt: `Nuevo set en la tienda: ${ns.name}` }); }
     } else { money = S.champion ? 600 : 2000; packs.base5 = S.champion ? 2 : 5; if (!S.champion) rewards.push({ txt: '👑 ¡Eres el nuevo Campeón de la Liga Pokémon de Kanto!' }); S.champion = true; }
-    if (spec.kind === 'leader' || spec.kind === 'league' || Math.random() < 0.35) { const locked = []; for (let i = 0; i < COIN_COUNT; i++) if (!S.coins.includes(i)) locked.push(i); if (locked.length) { const c = locked[Math.floor(Math.random() * locked.length)]; S.coins.push(c); rewards.push({ coin: c, txt: '¡Nueva moneda desbloqueada!' }); } }
+    if (spec.kind === 'leader' || spec.kind === 'league' || (spec.t && spec.t.boss && firstTime) || Math.random() < 0.35) { const locked = []; for (let i = 0; i < COIN_COUNT; i++) if (!S.coins.includes(i)) locked.push(i); if (locked.length) { const c = locked[Math.floor(Math.random() * locked.length)]; S.coins.push(c); rewards.push({ coin: c, txt: '¡Nueva moneda desbloqueada!' }); } }
   } else { S.stats.losses++; money = 20; }
   S.money += money; for (const [k, n] of Object.entries(packs)) S.packs[k] = (S.packs[k] || 0) + n;
   save();

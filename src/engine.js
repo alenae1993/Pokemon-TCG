@@ -369,7 +369,7 @@ class Game {
         const bs = await this.ask(p, { kind: 'cards', title: 'Elige Pokémon Básicos para tu Banca (opcional)', cards: rest, min: 0, max: Math.min(5, rest.length), purpose: 'setupBench' });
         for (const c of bs) { this.removeFrom(p.hand, c); const s = this.mkSlot(p, c); s.played = 0; p.bench.push(s); }
       }
-      const np = p.perk === 'giovanni' ? 5 : 6;
+      const np = (p.perk === 'giovanni' || p.perk === 'rocket') ? 5 : 6;
       for (let k = 0; k < np; k++) p.prizes.push(p.deck.pop());
     }
     // ventaja Blaine: energía de fuego gratis
@@ -509,7 +509,7 @@ class Game {
       if (bd.pw && bd.pw.name === 'Transform' && this.isActive(s)) return false;
       if (bd.name !== d.from) return false;
       if (ignoreTiming) return true;
-      const gio = (p.flags.giovanni && p.flags.giovanni === s.u) || (p.perk === 'giovanni' && bd.name.indexOf('Giovanni') >= 0 && !this.firstTurn[p.i]);
+      const gio = (p.flags.giovanni && p.flags.giovanni === s.u) || (p.perk === 'giovanni' && bd.name.indexOf('Giovanni') >= 0 && !this.firstTurn[p.i]) || (p.perk === 'rocket' && d.name.startsWith('Dark ') && !this.firstTurn[p.i]);
       if (gio) return true;
       if (this.firstTurn[p.i] || s.played === this.turnNo || s.evolved === this.turnNo) return false;
       return true;
@@ -751,6 +751,7 @@ class Game {
     // Ventajas de líder
     if (p.perk === 'surge' && e.types.includes('L')) x.perkBonus = 10;
     if (p.perk === 'blaine' && e.types.includes('R')) x.perkBonus = 10;
+    if (p.perk === 'rocket' && e.name.startsWith('Dark ')) x.perkBonus = 10;
     if (p.flags.koga && this.hasName(s, 'Koga')) x.post(() => { if (x.dealtMain > 0 && x.def && this.slots(o).includes(x.def)) this.setStatus(x.def, 'poisoned'); });
     // potenciadores (Danza Espada, Foco Energía...)
     const bo = s.fx.boost;
