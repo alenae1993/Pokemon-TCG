@@ -11,6 +11,13 @@ const RSYM = { C: '●', U: '◆', R: '★', RH: '★H', S: '★S', E: '' };
 const SETNAME = Object.fromEntries(C.SETS.map(s => [s.id, s.name]));
 const ENERGY_BASIC = ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
+const APP_VERSION = 'v7 · Team Rocket y 35 entrenadores de ruta';
+async function forceUpdate() {
+  toast('Buscando la versión más nueva…', 2500);
+  try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}
+  try { if (window.caches) { const ks = await caches.keys(); for (const k of ks) await caches.delete(k); } } catch (e) {}
+  setTimeout(() => location.reload(), 600);
+}
 
 // ---------- guardado ----------
 const SAVE_KEY = 'ptcg_kanto_save_v1';
@@ -137,6 +144,7 @@ function showTitle() {
   const t = $('#title'); t.hidden = false; t.innerHTML = '';
   const wrap = el('div', { style: 'display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px 16px;width:100%;' });
   wrap.append(el('div', { class: 'logo' }, 'LIGA KANTO', el('br'), el('span', { style: 'font-size:.42em;color:var(--ink);text-shadow:none' }, 'JUEGO DE CARTAS COLECCIONABLES')));
+  wrap.append(el('div', { class: 'muted', style: 'font-size:12px' }, APP_VERSION));
   wrap.append(el('div', { class: 'muted', style: 'max-width:640px;text-align:center' }, 'Base Set, Jungle, Fossil, Base Set 2, Team Rocket, Gym Heroes y Gym Challenge. Abre sobres, arma tu mazo y vence a los 8 líderes de gimnasio de Kanto.'));
   let pick = 0;
   const nameIn = el('input', { id: 'pname', placeholder: 'Tu nombre de entrenador', maxlength: 18, value: 'Rojo' });
@@ -444,6 +452,8 @@ function viewOpts(v) {
     el('h2', { class: 'cond', style: 'color:var(--gold)' }, 'Opciones'),
     el('label', { for: 'speed' }, 'Velocidad de la IA y las monedas: ', sp),
     el('div', {}, `Entrenador: ${S.name} · Victorias: ${S.stats.wins} · Derrotas: ${S.stats.losses}${S.champion ? ' · 👑 Campeón' : ''}`),
+    el('div', { class: 'muted', style: 'font-size:13px' }, 'Versión del juego: ', el('b', { style: 'color:var(--gold)' }, APP_VERSION)),
+    !window.claude ? el('div', {}, el('button', { onclick: forceUpdate }, '🔄 Buscar actualización')) : null,
     el('div', { class: 'muted', style: 'font-size:13px' }, dbRef ? 'Tu progreso se guarda automáticamente en tu cuenta y en este navegador.' : 'Tu progreso se guarda en este navegador. Usa "Exportar" para tener una copia de seguridad.'),
     el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, el('button', { onclick: exportSave }, 'Exportar partida'), el('button', { onclick: importSave }, 'Importar partida'), el('button', { class: 'danger', onclick: () => showModal('¿Empezar de cero?', el('p', {}, 'Se borrará tu colección, mazos y medallas.'), [{ t: 'Cancelar' }, { t: 'Borrar todo', cls: 'danger', f: () => { S = null; try { localStorage.removeItem(SAVE_KEY); } catch (e) {} if (dbRef) dbRef.set({ json: JSON.stringify(defaultSave()), updated: Date.now() }).catch(() => {}); showTitle(); } }]) }, 'Nueva partida'))));
 }
