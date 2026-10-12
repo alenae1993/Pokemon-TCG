@@ -1,0 +1,25 @@
+{
+ "name": "Liga Kanto TCG",
+ "short_name": "Liga Kanto",
+ "description": "Pokémon TCG era Base en español con campaña de gimnasios de Kanto.",
+ "lang": "es",
+ "start_url": "./",
+ "scope": "./",
+ "display": "fullscreen",
+ "orientation": "portrait",
+ "background_color": "#0c1828",
+ "theme_color": "#0c1828",
+ "icons": [
+  {
+   "src": "icons/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any maskable"
+  }
+ ]
+}
