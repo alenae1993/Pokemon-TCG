@@ -305,8 +305,8 @@ function revealPack(ov, setId, cards, k, n) {
         f.onclick = () => { if (f.classList.contains('up')) return; f.classList.add('up'); up++; if (up === cards.length) { done.hidden = false; all.hidden = true; } };
         fan.append(f);
       });
-      btnRow.append(all, done);
-      ov.append(el('div', { class: 'disp', style: 'color:var(--gold);font-size:20px' }, 'Haz clic en cada carta para descubrirla'), fan, btnRow);
+      btnRow.append(all, done); btnRow.className = 'opbar';
+      ov.append(el('div', { class: 'disp optitle', style: 'color:var(--gold);font-size:20px' }, TOUCH ? 'Toca cada carta para descubrirla' : 'Haz clic en cada carta para descubrirla'), fan, btnRow);
     };
   });
 }
@@ -319,7 +319,7 @@ function bulkReveal(ov, setId, all, n) {
     const g = el('div', { class: 'grid', style: 'max-width:1100px;width:100%;max-height:62vh;overflow:auto;padding:8px' });
     for (const id of ids) { const c = cardEl(id); c.append(el('span', { class: 'cnt' }, '×' + counts[id])); g.append(c); }
     const holos = all.filter(id => DB[id].rar === 'RH' || DB[id].rar === 'S').length;
-    ov.append(el('div', { class: 'disp', style: 'color:var(--gold);font-size:22px' }, `${n} sobres de ${SETNAME[setId]}`), el('div', {}, `${all.length} cartas · ${holos} holo · ${all.filter(id => DB[id].rar === 'R').length} raras`), g, el('button', { class: 'primary', onclick: res }, 'Listo'));
+    ov.append(el('div', { class: 'disp', style: 'color:var(--gold);font-size:22px' }, `${n} sobres de ${SETNAME[setId]}`), el('div', {}, `${all.length} cartas · ${holos} holo · ${all.filter(id => DB[id].rar === 'R').length} raras`), g, el('div', { class: 'opbar' }, el('button', { class: 'primary', onclick: res }, 'Listo')));
   });
 }
 
@@ -357,7 +357,7 @@ function viewDecks(v) {
   const inDeck = id => editDeck.cards.filter(x => x === id).length;
   const nameCount = n => editDeck.cards.filter(x => DB[x].name === n && !(DB[x].st === 'E' && DB[x].basic)).length;
   const canAdd = id => { const d = DB[id]; if (editDeck.cards.length >= 60) return false; if (d.st === 'E' && d.basic) return true; return inDeck(id) < (S.coll[id] || 0) && nameCount(d.name) < 4; };
-  const drawGrid = () => { grid.innerHTML = ''; for (const d of filtered(true)) { const c = cardEl(d.id); const avail = ENERGY_BASIC.includes(d.id) ? '∞' : (S.coll[d.id] - inDeck(d.id)); c.append(el('span', { class: 'cnt' }, avail)); if (!canAdd(d.id)) c.style.opacity = .45; c.onclick = () => { if (canAdd(d.id)) { editDeck.cards.push(d.id); drawAll(); } }; grid.append(c); } };
+  const drawGrid = () => { grid.innerHTML = ''; for (const d of filtered(true)) { const c = cardEl(d.id); const avail = ENERGY_BASIC.includes(d.id) ? '∞' : (S.coll[d.id] - inDeck(d.id)); c.append(el('span', { class: 'cnt' }, avail)); if (!canAdd(d.id)) c.style.opacity = .45; c.onclick = () => { if (canAdd(d.id)) { editDeck.cards.push(d.id); drawAll(); if (TOUCH) toast(`+1 ${d.nameEs} · ${editDeck.cards.length}/60`, 900); } }; grid.append(c); } };
   const drawList = () => {
     right.innerHTML = '';
     const nameIn = el('input', { value: editDeck.name, 'aria-label': 'Nombre del mazo', style: 'flex:1;min-width:0', oninput: () => editDeck.name = nameIn.value });
@@ -374,7 +374,7 @@ function viewDecks(v) {
       right.append(el('div', { class: 'cond', style: 'font-size:16px;color:var(--gold);margin-top:6px' }, `${lab} (${n})`));
       for (const id of ids) right.append(el('div', { class: 'dl-row', 'data-card': id }, el('span', { class: 'q' }, counts[id]), el('span', { class: 'nm' }, DB[id].nameEs, el('span', { class: 'muted', style: 'font-size:11px' }, ` ${SETNAME[DB[id].set]}`)), el('button', { 'aria-label': 'Quitar', onclick: () => { editDeck.cards.splice(editDeck.cards.indexOf(id), 1); drawAll(); } }, '−'), el('button', { 'aria-label': 'Añadir', disabled: canAdd(id) ? null : true, onclick: () => { editDeck.cards.push(id); drawAll(); } }, '+')));
     }
-    right.append(el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:12px' },
+    right.append(el('div', { class: 'savebar', style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:12px' },
       el('button', { onclick: autoEnergy, title: 'Rellena hasta 60 con Energía básica según los costes de tus Pokémon' }, 'Autocompletar energía'),
       el('button', { onclick: () => { editDeck.cards = []; drawAll(); } }, 'Vaciar'),
       el('button', { class: 'primary', onclick: () => { S.decks[editIdx] = { name: editDeck.name || 'Mazo', cards: editDeck.cards.slice() }; if (!errs.length) S.activeDeck = editIdx; save(); toast(errs.length ? 'Mazo guardado (aún no es válido para combatir)' : 'Mazo guardado y seleccionado ★'); editDeck = null; renderView(); } }, 'Guardar'),
@@ -387,9 +387,18 @@ function viewDecks(v) {
     let placed = 0; types.forEach((t, i) => { const n = i === types.length - 1 ? left - placed : Math.round(left * need[t] / tot); for (let k = 0; k < n; k++) editDeck.cards.push(P.Decks.ENERGY_ID[t]); placed += n; });
     drawAll();
   };
-  const drawAll = () => { drawGrid(); drawList(); };
+  const drawAll = () => { drawGrid(); drawList(); if (BT.deckTabLabel) BT.deckTabLabel(); };
   left.append(el('h2', { class: 'cond', style: 'color:var(--gold);font-size:24px;margin-bottom:8px' }, 'Constructor de mazos'), el('div', { class: 'muted', style: 'margin-bottom:8px;font-size:13px' }, '60 cartas, máximo 4 copias por nombre (la Energía básica es ilimitada y gratuita). Haz clic en una carta para añadirla.'), filterBar(drawGrid, false), grid);
-  wrap.append(left, right); v.append(wrap); drawAll();
+  // pestañas (sólo se ven en celular)
+  const tabs = el('div', { class: 'decktabs', role: 'tablist' });
+  const setTab = t => { wrap.dataset.tab = t; tabs.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.t === t)); try { localStorage.setItem('ptcg_decktab', t); } catch (e) {} };
+  const tabCards = el('button', { 'data-t': 'cards', role: 'tab', onclick: () => setTab('cards') }, 'Cartas');
+  const tabList = el('button', { 'data-t': 'list', role: 'tab', onclick: () => setTab('list') }, 'Mi mazo');
+  tabs.append(tabCards, tabList);
+  BT.deckTabLabel = () => { tabList.textContent = `Mi mazo (${editDeck.cards.length}/60)`; };
+  v.append(tabs); wrap.append(left, right); v.append(wrap);
+  let t0 = 'cards'; try { t0 = localStorage.getItem('ptcg_decktab') || 'cards'; } catch (e) {} setTab(t0);
+  drawAll();
 }
 // ---------- monedas ----------
 function viewCoins(v) {
