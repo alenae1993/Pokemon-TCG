@@ -505,7 +505,7 @@ class Game {
     if (this.anyPower('Prehistoric Power').length) return [];
     return this.slots(p).filter(s => {
       const bd = this.baseDef(s);
-      if (bd.st !== 'P') return false;
+      if (bd.st !== 'P' && bd.name !== 'Mysterious Fossil') return false;
       if (bd.pw && bd.pw.name === 'Transform' && this.isActive(s)) return false;
       if (bd.name !== d.from) return false;
       if (ignoreTiming) return true;

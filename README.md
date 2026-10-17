@@ -20,4 +20,4 @@ Se abre a pantalla completa y, tras la primera carga, funciona sin conexión.
 El progreso se guarda en el navegador del teléfono. Usa *Opciones → Exportar partida* para respaldarlo o pasarlo a otro dispositivo, e *Importar partida* para cargarlo.
 
 ## Actualizar
-Si cambias archivos, sube el número de versión en `sw.js` (`liga-kanto-v7` → `v8`) para que los teléfonos descarguen la versión nueva.
+Si cambias archivos, sube el número de versión en `sw.js` (`liga-kanto-v8` → `v8`) para que los teléfonos descarguen la versión nueva.

@@ -11,7 +11,7 @@ const RSYM = { C: '●', U: '◆', R: '★', RH: '★H', S: '★S', E: '' };
 const SETNAME = Object.fromEntries(C.SETS.map(s => [s.id, s.name]));
 const ENERGY_BASIC = ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v7 · Team Rocket y 35 entrenadores de ruta';
+const APP_VERSION = 'v8 · Fósiles corregidos';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}

@@ -264,7 +264,7 @@ async function maybeRetreat(g, p) {
   const curOk = cur && cur.miss === 0;
   const danger = o.active && (() => { const b = bestAttack(g, o, o.active, a); return b && b.miss <= 1 && estDmg(g, o.active, a, b.a) >= g.hpLeft(a); })();
   let bestB = null, bv = -1e9;
-  for (const s of p.bench) { const b = bestAttack(g, p, s, o.active); const v = (b && b.miss === 0 ? 50 + b.dmg : -b.miss * 15) + g.hpLeft(s) / 4; if (v > bv) { bv = v; bestB = s; } }
+  for (const s of p.bench) { const b = bestAttack(g, p, s, o.active); const v = (b && b.miss === 0 ? 50 + b.dmg : -(b ? b.miss : 4) * 15) + g.hpLeft(s) / 4; if (v > bv) { bv = v; bestB = s; } }
   const cost = g.retreatCost(a);
   const shouldMove = (!curOk && bv > 40) || (danger && g.hpLeft(bestB) > g.hpLeft(a) && bv > 0 && a.cards.length > 1) || (a.st === 'confused' && bv > 30);
   if (shouldMove && cost <= 2 && (cost === 0 || g.energyTokens(a).length - cost >= 0)) {
