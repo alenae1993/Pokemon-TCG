@@ -81,6 +81,7 @@ AI.decide = async function (g, p, req) {
     }
     case 'type': {
       const allowed = (req.only || ['G', 'R', 'W', 'L', 'P', 'F']).filter(t => !(req.exclude || []).includes(t));
+      if (req.hint && allowed.includes(req.hint)) return req.hint;
       if (pur === 'resType' && o.active) { const t = g.eff(o.active).types[0]; if (allowed.includes(t)) return t; }
       if (pur === 'weakType' && req.slot) { const t = g.eff(req.slot).types[0]; if (allowed.includes(t)) return t; }
       if (pur === 'shiftType' && o.active) { const t = g.eff(o.active).weak; if (allowed.includes(t)) return t; }
@@ -163,6 +164,8 @@ AI.takeTurn = async function (g, p) {
   let guard = 0;
   // 1. básicos a la banca
   const maxBench = L === 1 ? 3 : (L === 2 ? 4 : 5);
+  // Evolución de Bebé primero (Pichu → Pikachu)
+  for (const c of p.hand.slice()) { if (!ok()) return; if (g.def(c).st === 'P' && g.def(c).stage === 0) { const ts = g.evoTargets(p, c); if (ts.length) { await g.evolve(p, c, ts[0]); await sleep(350); } } }
   for (const c of p.hand.slice()) { if (!ok()) return; if (g.isBasicCard(c) && g.def(c).st === 'P' && p.bench.length < Math.min(maxBench, g.benchMax(p))) { await g.playBasic(p, c); await sleep(350); } }
   // 2. evolucionar
   let changed = true;

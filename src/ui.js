@@ -5,13 +5,13 @@ const P = window.PTCG, C = P.Campaign, DB = P.DB;
 const $ = (s, r = document) => r.querySelector(s);
 const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k === 'style') e.style.cssText = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v); } for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k))); return e; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const TYPES = { G: 'Planta', R: 'Fuego', W: 'Agua', L: 'Rayo', P: 'Psíquico', F: 'Lucha', C: 'Incoloro' };
-const RARES = { C: 'Común', U: 'Poco común', R: 'Rara', RH: 'Rara Holo', S: 'Secreta', E: 'Energía' };
-const RSYM = { C: '●', U: '◆', R: '★', RH: '★H', S: '★S', E: '' };
+const TYPES = { G: 'Planta', R: 'Fuego', W: 'Agua', L: 'Rayo', P: 'Psíquico', F: 'Lucha', C: 'Incoloro', D: 'Siniestro', M: 'Metálico' };
+const RARES = { C: 'Común', U: 'Poco común', R: 'Rara', RH: 'Rara Holo', SH: 'Brillante', S: 'Secreta', E: 'Energía' };
+const RSYM = { C: '●', U: '◆', R: '★', RH: '★H', SH: '✦', S: '★S', E: '' };
 const SETNAME = Object.fromEntries(C.SETS.map(s => [s.id, s.name]));
 const ENERGY_BASIC = ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v8 · Fósiles corregidos';
+const APP_VERSION = 'v9 · Johto y las expansiones Neo';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}
@@ -22,7 +22,7 @@ async function forceUpdate() {
 // ---------- guardado ----------
 const SAVE_KEY = 'ptcg_kanto_save_v1';
 let S = null; let dbRef = null; let saveTimer = null;
-function defaultSave() { return { v: 1, name: '', money: 0, coll: {}, packs: {}, decks: [], activeDeck: 0, badges: [], beaten: {}, coins: [0, 2, 4, 6], coin: 0, stats: { wins: 0, losses: 0 }, opts: { speed: 1 }, champion: false, created: Date.now(), updated: 0 }; }
+function defaultSave() { return { v: 1, name: '', money: 0, coll: {}, packs: {}, decks: [], activeDeck: 0, badges: [], badgesJ: [], region: 'kanto', championJ: false, beaten: {}, coins: [0, 2, 4, 6], coin: 0, stats: { wins: 0, losses: 0 }, opts: { speed: 1 }, champion: false, created: Date.now(), updated: 0 }; }
 function lsGet() { try { const t = localStorage.getItem(SAVE_KEY); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
 function lsSet(s) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) {} }
 function save() { if (!S) return; S.updated = Date.now(); lsSet(S); clearTimeout(saveTimer); saveTimer = setTimeout(async () => { if (dbRef) { try { await dbRef.set({ json: JSON.stringify(S), updated: S.updated }); } catch (e) {} } }, 800); }
@@ -42,12 +42,35 @@ async function initCloud() {
 // ---------- utilidades de cartas ----------
 function cardEl(id, opts = {}) {
   const d = DB[id]; const e = el('div', { class: 'card' + (opts.cls ? ' ' + opts.cls : ''), 'data-card': id });
-  if (!d || !d.img) { e.classList.add('back'); return e; }
+  if (!d) { e.classList.add('back'); return e; }
+  if (!d.img) { drawCard(e, d); if (opts.holo !== false && (d.rar === 'RH' || d.rar === 'SH')) e.classList.add('holo'); return e; }
   const [sheet, idx] = d.img; const col = idx % 5, row = Math.floor(idx / 5);
   e.style.backgroundImage = `url(assets/cards${String(sheet).padStart(2, '0')}.webp)`;
   e.style.backgroundPosition = `${col * 25}% ${row * 33.3333}%`;
   if (opts.holo !== false && (d.rar === 'RH' || d.rar === 'S')) e.classList.add('holo');
   return e;
+}
+// carta dibujada (cuando no hay imagen escaneada)
+const SETCODE = Object.fromEntries(C.SETS.map(s => [s.id, s.code]));
+function drawCard(e, d) {
+  e.classList.add('drawn');
+  const ty = d.st === 'P' ? d.types[0] : d.st === 'E' ? (d.etype || 'C') : 'T';
+  const box = el('div', { class: 'dc t-' + ty + (d.st === 'T' ? ' tr' : '') + (d.shining ? ' shiny' : '') + (/^Dark /.test(d.name) ? ' dark' : '') + (/^Light /.test(d.name) ? ' light' : '') });
+  if (d.st === 'P') {
+    box.append(el('div', { class: 'dc-top' }, el('span', { class: 'dc-st' }, d.baby ? 'BEBÉ' : STAGE[d.stage].toUpperCase()), el('b', { class: 'dc-nm' }, d.nameEs), el('span', { class: 'dc-hp' }, d.hp + ' PS')));
+    box.append(el('div', { class: 'dc-art' }, el('span', { class: 'dc-ico', style: `background-image:url(assets/e_${ty}.webp)` }), d.dex ? el('span', { class: 'dc-dex' }, '#' + d.dex) : null));
+    const at = el('div', { class: 'dc-atk' });
+    if (d.pw) at.append(el('div', { class: 'dc-pw' }, '★ ' + d.pw.nameEs));
+    for (const a of d.atk) at.append(el('div', { class: 'dc-a' }, el('span', { class: 'dc-cost' }, ...a.cost.map(t => el('i', { style: `background-image:url(assets/e_${t}.webp)` }))), el('span', { class: 'dc-an' }, a.nameEs), el('b', {}, a.dmg || '')));
+    box.append(at);
+  } else if (d.st === 'E') {
+    box.append(el('div', { class: 'dc-top' }, el('b', { class: 'dc-nm' }, d.nameEs)), el('div', { class: 'dc-art en' }, el('span', { class: 'dc-ico', style: `background-image:url(assets/e_${ty}.webp)` })), el('div', { class: 'dc-txt' }, d.basic ? '' : d.es));
+  } else {
+    const sub = (d.sub || []).includes('Stadium') ? 'ESTADIO' : (d.sub || []).includes('Pokémon Tool') ? 'HERRAMIENTA' : 'ENTRENADOR';
+    box.append(el('div', { class: 'dc-top' }, el('span', { class: 'dc-st' }, sub), el('b', { class: 'dc-nm' }, d.nameEs)), el('div', { class: 'dc-txt' }, d.es));
+  }
+  box.append(el('div', { class: 'dc-ft' }, `${SETCODE[d.set] || ''} ${d.num} ${RSYM[d.rar] || ''}`));
+  e.append(box);
 }
 const backEl = (cls) => el('div', { class: 'card back' + (cls ? ' ' + cls : '') });
 const eIcon = t => el('span', { class: 'ei', style: `background-image:url(assets/e_${t}.webp)`, title: TYPES[t] });
@@ -55,14 +78,33 @@ const nm = id => DB[id].nameEs;
 function toast(msg, ms = 2400) { const t = el('div', { class: 'toast', role: 'status' }, msg); document.body.append(t); setTimeout(() => t.remove(), ms); }
 function addCards(ids) { for (const id of ids) S.coll[id] = (S.coll[id] || 0) + 1; }
 function badgeEl(key, off) {
-  const box = el('div', { class: 'badge-slot' + (off ? ' off' : ''), title: (C.GYMS.find(g => g.badge === key) || {}).badgeEs || '' });
-  if (key === 'cascade' || key === 'thunder') {
+  const box = el('div', { class: 'badge-slot' + (off ? ' off' : ''), title: (C.GYMS.concat(C.JGYMS).find(g => g.badge === key) || {}).badgeEs || '' });
+  if (JBADGE[key]) { box.innerHTML = `<svg viewBox="0 0 40 40">${JBADGE[key]}</svg>`; }
+  else if (key === 'cascade' || key === 'thunder') {
     box.innerHTML = key === 'cascade'
       ? '<svg viewBox="0 0 40 40"><path d="M20 3 C27 13 33 19 33 26 a13 13 0 0 1-26 0 C7 19 13 13 20 3z" fill="#4fb3f5" stroke="#cfeaff" stroke-width="2"/><path d="M14 26 a6 6 0 0 0 6 6" stroke="#fff" stroke-width="2" fill="none"/></svg>'
       : '<svg viewBox="0 0 40 40"><polygon points="13,3 27,3 37,13 37,27 27,37 13,37 3,27 3,13" fill="#f1a629" stroke="#ffe7a3" stroke-width="2"/><polygon points="15,10 25,10 30,15 30,25 25,30 15,30 10,25 10,15" fill="#ffd257"/></svg>';
   } else box.append(el('img', { src: `assets/badge_${key}.webp`, alt: '' }));
   return box;
 }
+const JBADGE = {
+  zephyr: '<path d="M4 26 C10 10 26 4 37 6 C30 10 26 14 24 20 C20 18 14 20 10 26 Z" fill="#c9d3dc" stroke="#fff" stroke-width="1.5"/><path d="M10 26 C16 22 22 22 26 26 C20 30 14 32 6 32 Z" fill="#9fb0bf" stroke="#fff" stroke-width="1.5"/>',
+  hive: '<ellipse cx="20" cy="22" rx="14" ry="13" fill="#d7322e" stroke="#ffd0c8" stroke-width="2"/><path d="M20 9 V35" stroke="#2b1b1b" stroke-width="2"/><circle cx="13" cy="20" r="3" fill="#2b1b1b"/><circle cx="27" cy="20" r="3" fill="#2b1b1b"/><circle cx="14" cy="28" r="2.4" fill="#2b1b1b"/><circle cx="26" cy="28" r="2.4" fill="#2b1b1b"/>',
+  plain: '<polygon points="20,3 37,20 20,37 3,20" fill="#f3c63c" stroke="#fff6c8" stroke-width="2"/><polygon points="20,11 29,20 20,29 11,20" fill="#e39b1e"/>',
+  fog: '<circle cx="20" cy="20" r="15" fill="#7b5aa6" stroke="#e2d4ff" stroke-width="2"/><path d="M8 18 C14 12 26 12 32 18 C26 16 14 16 8 18Z M8 24 C14 30 26 30 32 24 C26 26 14 26 8 24Z" fill="#cdb8ef"/>',
+  storm: '<path d="M8 8 H30 L34 16 L28 34 H12 L6 22 Z" fill="#8e5a35" stroke="#f1c79c" stroke-width="2"/><path d="M14 14 H26 V24 H14 Z" fill="#f1c79c"/>',
+  mineral: '<polygon points="20,3 35,12 35,28 20,37 5,28 5,12" fill="#b9c3cc" stroke="#fff" stroke-width="2"/><polygon points="20,11 28,16 28,24 20,29 12,24 12,16" fill="#7c8a96"/>',
+  glacier: '<polygon points="20,2 25,15 38,20 25,25 20,38 15,25 2,20 15,15" fill="#9fe3ff" stroke="#fff" stroke-width="2"/><circle cx="20" cy="20" r="4" fill="#4fb3f5"/>',
+  rising: '<path d="M20 3 C30 8 36 16 34 26 C30 22 26 22 24 26 L20 37 L16 26 C14 22 10 22 6 26 C4 16 10 8 20 3 Z" fill="#2f4fa8" stroke="#bcd0ff" stroke-width="2"/><circle cx="20" cy="15" r="3" fill="#ffd257"/>',
+};
+// ---------- regiones ----------
+const johtoOpen = () => S.badges.length >= 8;
+const REG = () => C.REGIONS[S.region === 'johto' && johtoOpen() ? 'johto' : 'kanto'];
+const regionOf = x => C.REGIONS[x && x.region === 'johto' ? 'johto' : 'kanto'];
+const badgesOf = r => r.id === 'johto' ? (S.badgesJ || (S.badgesJ = [])) : S.badges;
+const hasBadge = g => badgesOf(regionOf(g)).includes(g.id);
+const setLocked = s => s.region === 'johto' ? (!johtoOpen() || badgesOf(C.REGIONS.johto).length < s.unlock) : S.badges.length < s.unlock;
+const setLockMsg = s => s.region === 'johto' ? (!johtoOpen() ? '🔒 Viaja a Johto (consigue las 8 medallas de Kanto)' : `🔒 Se desbloquea con ${s.unlock} medalla(s) de Johto`) : `🔒 Se desbloquea con ${s.unlock} medalla(s)`;
 function coinFace(i, tails) { const c = 2 * (i % 16) + (tails ? 1 : 0), r = Math.floor(i / 16); return `background-position:${c * 100 / 31}% ${r * 100 / 9}%`; }
 const COIN_COUNT = 152;
 
@@ -191,49 +233,70 @@ function showHub(view) {
 function renderTop() {
   const nav = $('#nav'); nav.innerHTML = '';
   for (const [k, l] of NAV) nav.append(el('button', { class: curView === k ? 'on' : '', onclick: () => { curView = k; renderTop(); renderView(); } }, l + (k === 'shop' && packCount() ? ` (${packCount()})` : '')));
-  const b = $('#badges'); b.innerHTML = ''; for (const g of C.GYMS) b.append(badgeEl(g.badge, !S.badges.includes(g.id)));
+  const b = $('#badges'); b.innerHTML = ''; for (const g of REG().GYMS) b.append(badgeEl(g.badge, !hasBadge(g)));
   $('#money').textContent = `₽ ${S.money.toLocaleString('es-CL')}`;
 }
 const packCount = () => Object.values(S.packs).reduce((a, b) => a + b, 0);
 function renderView() { const v = $('#view'); v.innerHTML = ''; ({ map: viewMap, shop: viewShop, coll: viewColl, decks: viewDecks, coins: viewCoins, opts: viewOpts })[curView](v); }
 
 // ---------- mapa ----------
-function viewMap(v) {
-  const hub = el('div', { class: 'hub' });
-  const map = el('div', { id: 'map' });
-  map.innerHTML = `<svg class="land" viewBox="0 0 100 62.5" preserveAspectRatio="none" aria-hidden="true">
-    <defs><pattern id="gr" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="#5cae55"/><circle cx="1" cy="1" r=".25" fill="#4e9d48"/></pattern></defs>
-    <path d="M4 2 H92 V30 H96 V44 L84 48 L80 40 L70 44 L66 52 L54 58 L40 60 L36 52 L26 50 L16 44 L10 52 L4 50 Z" fill="url(#gr)" stroke="#e8d9a0" stroke-width=".6"/>
+const LAND = {
+  kanto: `<path d="M4 2 H92 V30 H96 V44 L84 48 L80 40 L70 44 L66 52 L54 58 L40 60 L36 52 L26 50 L16 44 L10 52 L4 50 Z" fill="url(#gr)" stroke="#e8d9a0" stroke-width=".6"/>
     <path d="M14 50 L20 52 L22 58 L14 58 Z" fill="url(#gr)" stroke="#e8d9a0" stroke-width=".5"/>
     <path d="M30 56 L38 56 L36 60 L30 60Z" fill="#d9e8f2" opacity=".7"/>
-    <g stroke="#e9d38b" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-dasharray="0">
+    <g stroke="#e9d38b" stroke-width="1.6" fill="none" stroke-linecap="round">
       <path d="M22 44 L22 35 L20 27 L22 19 L40 11 L58 11 L60 5"/><path d="M58 11 L56 26 L52 26 L40 27 L18 35"/><path d="M56 26 L62 39 L66 45"/><path d="M58 11 L80 25 L82 39 L62 39"/><path d="M40 27 L30 45 L48 51 L56 56"/><path d="M48 51 L34 57 L20 54 L14 50 L18 35"/><path d="M18 35 L8 19 L8 5"/>
-    </g></svg>`;
+    </g>`,
+  johto: `<path d="M16 6 L40 3 L60 1 L80 2 L98 2 L99 40 L96 52 L80 56 L64 58 L50 60 L42 56 L34 50 L26 44 L18 34 L14 22 Z" fill="url(#gr)" stroke="#e8d9a0" stroke-width=".6"/>
+    <path d="M2 31 L13 31 L14 41 L3 42 Z" fill="url(#gr)" stroke="#e8d9a0" stroke-width=".5"/>
+    <path d="M1 1 L12 1 L13 8 L2 9 Z" fill="#c9c2b4" stroke="#efe6d0" stroke-width=".5"/>
+    <path d="M56 1 L68 1 L67 6 L57 6Z" fill="#7cc0e8" opacity=".85"/>
+    <path d="M78 6 L82 8 L80 10" fill="#e6f6ff" opacity=".7"/>
+    <g stroke="#e9d38b" stroke-width="1.6" fill="none" stroke-linecap="round">
+      <path d="M90 46 L82 44 L76 51 M82 44 L76 39 L70 27.5 L78 24"/><path d="M70 27.5 L60 35 L62 47.5 L56 54 L50 57.5 L46 51 L42 45 L40 36 L44 26 L42 17.5 L34 12.5"/>
+      <path d="M42 17.5 L28 20 L20 24 L14 17.5"/><path d="M42 17.5 L64 15 L70 19 M64 15 L62 5 M64 15 L76 9 L86 12.5 L94 5"/><path d="M90 46 L94 37.5 L96 27.5"/>
+    </g>
+    <path d="M20 24 L14 31 L8 37.5 M8 37.5 L12 31" stroke="#9fd0f0" stroke-width="1.2" stroke-dasharray="1.6 1.2" fill="none"/>`,
+};
+function viewMap(v) {
+  const reg = REG(); const isJ = reg.id === 'johto';
+  const hub = el('div', { class: 'hub' });
+  const map = el('div', { id: 'map', class: isJ ? 'johto' : '' });
+  map.innerHTML = `<svg class="land" viewBox="0 0 100 62.5" preserveAspectRatio="none" aria-hidden="true">
+    <defs><pattern id="gr" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="${isJ ? '#62a85a' : '#5cae55'}"/><circle cx="1" cy="1" r=".25" fill="#4e9d48"/></pattern></defs>${LAND[reg.id]}</svg>`;
   const nodes = [];
-  const badgeN = S.badges.length;
-  const gymDone = id => S.badges.includes(id);
-  C.GYMS.forEach((g, i) => nodes.push({ x: g.x, y: g.y, label: g.city, cls: 'gym' + (gymDone(g.id) ? ' done' : '') + (i > badgeN ? ' lock' : ''), txt: String(i + 1), on: () => i <= badgeN ? gymPanel(g, i) : toast(`Necesitas ${i} medalla(s) para entrar.`) }));
+  const myB = badgesOf(reg); const badgeN = myB.length;
+  reg.GYMS.forEach((g, i) => nodes.push({ x: g.x, y: g.y, label: g.city, cls: 'gym' + (myB.includes(g.id) ? ' done' : '') + (i > badgeN ? ' lock' : ''), txt: String(i + 1), on: () => i <= badgeN ? gymPanel(g, i) : toast(`Necesitas ${i} medalla(s)${isJ ? ' de Johto' : ''} para entrar.`) }));
   // un punto por lugar (agrupa entrenadores de ruta y del Team Rocket)
   const places = {};
-  for (const r of C.ROUTES.concat(C.ROCKET)) { const pl = places[r.place] || (places[r.place] = { place: r.place, list: [] }); pl.list.push(r); if (r.x != null && pl.x == null) { pl.x = r.x; pl.y = r.y; } }
+  for (const r of reg.ROUTES.concat(reg.ROCKET)) { const pl = places[r.place] || (places[r.place] = { place: r.place, list: [] }); pl.list.push(r); if (r.x != null && pl.x == null) { pl.x = r.x; pl.y = r.y; } }
   for (const pl of Object.values(places)) {
     if (pl.x == null) continue;
     const minReq = Math.min(...pl.list.map(r => r.req));
-    const routes = pl.list.filter(r => !C.ROCKET.includes(r));
-    const rk = pl.list.filter(r => C.ROCKET.includes(r));
+    const routes = pl.list.filter(r => !reg.ROCKET.includes(r));
+    const rk = pl.list.filter(r => reg.ROCKET.includes(r));
     const rkOpen = rk.some(r => rocketOpen(r) && !S.beaten[r.id]);
     const allDone = pl.list.every(r => S.beaten[r.id]);
     const maxLv = Math.max(...pl.list.map(r => r.level));
-    nodes.push({ x: pl.x, y: pl.y, label: pl.place + (pl.list.length > 1 ? ` (${pl.list.length})` : ''), cls: (allDone ? 'done' : '') + (badgeN < minReq ? ' lock' : '') + (rkOpen ? ' rocket' : '') + (!routes.length ? ' rocketonly' : ''), txt: rkOpen || !routes.length ? 'R' : '★'.repeat(Math.min(3, Math.ceil(maxLv / 2))), on: () => badgeN >= minReq ? placePanel(pl.place) : toast(`Disponible con ${minReq} medalla(s).`) });
+    nodes.push({ x: pl.x, y: pl.y, label: pl.place + (pl.list.length > 1 ? ` (${pl.list.length})` : ''), cls: (allDone ? 'done' : '') + (badgeN < minReq ? ' lock' : '') + (rkOpen ? ' rocket' : '') + (!routes.length ? ' rocketonly' : ''), txt: rkOpen || !routes.length ? 'R' : '★'.repeat(Math.min(3, Math.ceil(maxLv / 2))), on: () => badgeN >= minReq ? placePanel(pl.place) : toast(`Disponible con ${minReq} medalla(s)${isJ ? ' de Johto' : ''}.`) });
   }
-  const L = C.LEAGUE; nodes.push({ x: L.x, y: L.y, label: L.place, cls: 'gym' + (S.champion ? ' done' : '') + (badgeN < 8 ? ' lock' : ''), txt: '👑', on: () => badgeN >= 8 ? leaguePanel() : toast('Consigue las 8 medallas para entrar en la Liga.') });
-  nodes.push({ x: 31, y: 81, label: 'Pueblo Paleta', cls: 'done', txt: '⌂', on: () => { curView = 'shop'; renderTop(); renderView(); } });
+  const L = reg.LEAGUE; const champ = isJ ? S.championJ : S.champion;
+  nodes.push({ x: L.x, y: L.y, label: L.place, cls: 'gym' + (champ ? ' done' : '') + (badgeN < 8 ? ' lock' : ''), txt: '👑', on: () => badgeN >= 8 ? leaguePanel() : toast(`Consigue las 8 medallas${isJ ? ' de Johto' : ''} para entrar en la Liga.`) });
+  nodes.push({ x: reg.home.x, y: reg.home.y, label: reg.home.label, cls: 'done', txt: '⌂', on: () => { curView = 'shop'; renderTop(); renderView(); } });
   for (const n of nodes) map.append(el('button', { class: 'node ' + n.cls, style: `left:${n.x}%;top:${n.y}%`, onclick: n.on, 'aria-label': n.label }, el('span', { class: 'dot' }, n.txt), el('span', { class: 'lbl' }, n.label)));
   const side = el('div', { class: 'panel', id: 'mapside' });
-  hub.append(el('div', {}, map), side);
+  const left = el('div', {});
+  // selector de región
+  const tabs = el('div', { class: 'regtabs' });
+  for (const r of Object.values(C.REGIONS)) {
+    const lock = r.id === 'johto' && !johtoOpen();
+    tabs.append(el('button', { class: (reg.id === r.id ? 'on' : '') + (lock ? ' lock' : ''), onclick: () => { if (lock) return toast('Johto se abre al conseguir las 8 medallas de Kanto.'); S.region = r.id; save(); renderTop(); renderView(); } }, (lock ? '🔒 ' : '') + r.name, el('span', { class: 'cnt' }, ` ${badgesOf(r).length}/8`)));
+  }
+  left.append(tabs, map);
+  hub.append(left, side);
   v.append(hub);
   // panel por defecto: siguiente objetivo
-  const next = C.GYMS[badgeN];
+  const next = reg.GYMS[badgeN];
   if (next) gymPanel(next, badgeN); else leaguePanel();
 }
 function oppRow(o, onFight, extra) {
@@ -243,32 +306,34 @@ function gymPanel(g, i) {
   const side = $('#mapside'); side.innerHTML = '';
   const perk = C.PERKS[g.perk];
   const t1 = S.beaten['g_' + g.id + '_0'], t2 = S.beaten['g_' + g.id + '_1'];
-  side.append(el('div', { style: 'display:flex;gap:10px;align-items:center' }, badgeEl(g.badge, !S.badges.includes(g.id)), el('div', {}, el('h2', { class: 'cond', style: 'font-size:22px;color:var(--gold)' }, `Gimnasio de ${g.city}`), el('div', { class: 'muted' }, `Líder ${g.leader} · tipo `, eIcon(g.type), ` · ${g.badgeEs}`))));
+  side.append(el('div', { style: 'display:flex;gap:10px;align-items:center' }, badgeEl(g.badge, !hasBadge(g)), el('div', {}, el('h2', { class: 'cond', style: 'font-size:22px;color:var(--gold)' }, `Gimnasio de ${g.city}`), el('div', { class: 'muted' }, `Líder ${g.leader} · tipo `, eIcon(g.type), ` · ${g.badgeEs}`))));
   g.trainers.forEach((t, k) => side.append(oppRow(Object.assign({ types: t.types }, t), () => preBattle({ kind: 'gymTrainer', gym: g, idx: k, t }), S.beaten['g_' + g.id + '_' + k] ? '✔ Vencido' : 'Entrenador del gimnasio')));
   const canLeader = t1 && t2;
-  const lrow = oppRow({ name: 'Líder ' + g.leader, portrait: g.portrait, level: g.level, types: [g.type] }, () => canLeader ? preBattle({ kind: 'leader', gym: g, idx: i }) : toast('Primero vence a los 2 entrenadores del gimnasio.'), canLeader ? (S.badges.includes(g.id) ? '✔ Medalla obtenida (revancha)' : '¡Listo para el combate!') : 'Vence a los 2 entrenadores primero');
+  const lrow = oppRow({ name: 'Líder ' + g.leader, portrait: g.portrait, level: g.level, types: [g.type] }, () => canLeader ? preBattle({ kind: 'leader', gym: g, idx: i }) : toast('Primero vence a los 2 entrenadores del gimnasio.'), canLeader ? (hasBadge(g) ? '✔ Medalla obtenida (revancha)' : '¡Listo para el combate!') : 'Vence a los 2 entrenadores primero');
   side.append(lrow);
   side.append(el('div', { class: 'pw', style: 'margin-top:10px;background:#2a1f3d;border-left:3px solid var(--gold);padding:8px;border-radius:6px' }, el('b', {}, `Ventaja del líder: ${perk.name}`), el('div', { style: 'font-size:13px' }, perk.es)));
   side.append(el('p', { class: 'muted', style: 'font-style:italic;font-size:13px' }, `«${g.quote}»`));
 }
-function rocketOpen(r) { const i = C.ROCKET.indexOf(r); return S.badges.length >= r.req && (i === 0 || !!S.beaten[C.ROCKET[i - 1].id]); }
-function rocketProgress() { return C.ROCKET.filter(r => S.beaten[r.id]).length; }
+function rocketOpen(r) { const reg = regionOf(r); const L = reg.ROCKET; const i = L.indexOf(r); return badgesOf(reg).length >= r.req && (i === 0 || !!S.beaten[L[i - 1].id]); }
+function rocketProgress(reg) { return reg.ROCKET.filter(r => S.beaten[r.id]).length; }
 function placePanel(place) {
   const side = $('#mapside'); side.innerHTML = '';
   side.append(el('h2', { class: 'cond', style: 'font-size:22px;color:var(--gold)' }, place));
-  const badgeN = S.badges.length;
-  const routes = C.ROUTES.filter(x => x.place === place);
+  const reg = REG(); const badgeN = badgesOf(reg).length;
+  const routes = reg.ROUTES.filter(x => x.place === place);
   for (const x of routes) {
     if (badgeN < x.req) { side.append(el('div', { class: 'opp-row', style: 'opacity:.5' }, el('div', { class: 'info' }, el('b', {}, x.name), ` · 🔒 con ${x.req} medalla(s)`))); continue; }
-    side.append(oppRow(x, () => preBattle({ kind: 'route', t: x }), (x.rival ? '⚔️ Tu rival · ' : '') + (S.beaten[x.id] ? `✔ Vencido ${S.beaten[x.id]} vez/veces` : 'Primera victoria: sobre de regalo') + (x.sets ? ' · Sets: ' + x.sets.map(s => SETNAME[s]).join(', ') : ' · Todos los sets')));
+    side.append(oppRow(x, () => preBattle({ kind: 'route', t: x }), (x.rival ? '⚔️ Tu rival · ' : '') + (x.boss ? '👑 Leyenda · ' : '') + (S.beaten[x.id] ? `✔ Vencido ${S.beaten[x.id]} vez/veces` : 'Primera victoria: sobre de regalo') + (x.region === 'johto' ? (x.sets && x.sets.length > 4 ? ' · Todos los sets' : ' · Sets Neo') : x.sets ? ' · Sets: ' + x.sets.map(s => SETNAME[s]).join(', ') : ' · Sets de Kanto')));
+    if (x.boss && x.quote && !S.beaten[x.id]) side.append(el('p', { class: 'muted', style: 'font-style:italic;font-size:12.5px;margin:4px 0 0' }, `«${x.quote}»`));
+    if (x.perk) side.append(el('div', { class: 'pw', style: 'margin-top:6px;background:#2a1f3d;border-left:3px solid var(--gold);padding:8px;border-radius:6px' }, el('b', {}, 'Ventaja: ' + C.PERKS[x.perk].name), el('div', { style: 'font-size:13px' }, C.PERKS[x.perk].es)));
   }
-  const rk = C.ROCKET.filter(x => x.place === place);
+  const rk = reg.ROCKET.filter(x => x.place === place);
   if (rk.length) {
-    side.append(el('div', { class: 'rocket-head' }, el('span', { class: 'rbadge' }, 'R'), el('b', {}, 'Team Rocket'), el('span', { class: 'muted', style: 'font-size:12.5px' }, `Misión ${rocketProgress()}/${C.ROCKET.length} · sólo Pokémon Oscuros`)));
+    side.append(el('div', { class: 'rocket-head' }, el('span', { class: 'rbadge' }, 'R'), el('b', {}, 'Team Rocket'), el('span', { class: 'muted', style: 'font-size:12.5px' }, `Misión ${rocketProgress(reg)}/${reg.ROCKET.length} · sólo Pokémon Oscuros`)));
     for (const x of rk) {
-      const i = C.ROCKET.indexOf(x);
-      if (!rocketOpen(x)) { const prev = C.ROCKET[i - 1]; side.append(el('div', { class: 'opp-row rk', style: 'opacity:.55' }, el('div', { class: 'info' }, el('b', {}, x.name), el('div', { class: 'muted', style: 'font-size:12.5px' }, badgeN < x.req ? `🔒 Requiere ${x.req} medalla(s)` : `🔒 Primero vence a ${prev.name} (${prev.place})`)))); continue; }
-      const row = oppRow(Object.assign({}, x), () => preBattle({ kind: 'rocket', t: x }), (x.boss ? '👑 Jefe del Team Rocket · ' : '') + (S.beaten[x.id] ? `✔ Vencido ${S.beaten[x.id]} vez/veces` : 'Primera victoria: sobres de Team Rocket'));
+      const i = reg.ROCKET.indexOf(x);
+      if (!rocketOpen(x)) { const prev = reg.ROCKET[i - 1]; side.append(el('div', { class: 'opp-row rk', style: 'opacity:.55' }, el('div', { class: 'info' }, el('b', {}, x.name), el('div', { class: 'muted', style: 'font-size:12.5px' }, badgeN < x.req ? `🔒 Requiere ${x.req} medalla(s)${reg.id === 'johto' ? ' de Johto' : ''}` : `🔒 Primero vence a ${prev.name} (${prev.place})`)))); continue; }
+      const row = oppRow(Object.assign({}, x), () => preBattle({ kind: 'rocket', t: x }), (x.boss ? '👑 Jefe del Team Rocket · ' : '') + (S.beaten[x.id] ? `✔ Vencido ${S.beaten[x.id]} vez/veces` : `Primera victoria: sobres de ${reg.id === 'johto' ? 'Neo Destiny' : 'Team Rocket'}`));
       row.classList.add('rk'); side.append(row);
       if (x.quote && !S.beaten[x.id]) side.append(el('p', { class: 'muted', style: 'font-style:italic;font-size:12.5px;margin:4px 0 0' }, `«${x.quote}»`));
     }
@@ -277,11 +342,25 @@ function placePanel(place) {
   if (routes.length) side.append(el('p', { class: 'muted', style: 'font-size:13px' }, 'Los entrenadores de ruta pueden desafiarse cuantas veces quieras para ganar Pokédólares.'));
 }
 function routePanel(r) { placePanel(r.place); }
+function eliteOpen(e) { const i = C.JELITE.indexOf(e); return badgesOf(C.REGIONS.johto).length >= 8 && (i === 0 || !!S.beaten[C.JELITE[i - 1].id]); }
 function leaguePanel() {
+  if (REG().id === 'johto') return elitePanel();
   const side = $('#mapside'); side.innerHTML = ''; const L = C.LEAGUE;
   side.append(el('h2', { class: 'cond', style: 'font-size:22px;color:var(--gold)' }, 'Meseta Añil — Liga Pokémon'));
   side.append(oppRow(Object.assign({ types: ['C'] }, L), () => S.badges.length >= 8 ? preBattle({ kind: 'league', t: L }) : toast('Necesitas las 8 medallas.'), S.champion ? '👑 Ya eres Campeón' : 'Requiere 8 medallas'));
   side.append(el('p', { class: 'muted', style: 'font-style:italic;font-size:13px' }, `«${L.quote}»`));
+}
+function elitePanel() {
+  const side = $('#mapside'); side.innerHTML = '';
+  const bJ = badgesOf(C.REGIONS.johto).length;
+  side.append(el('h2', { class: 'cond', style: 'font-size:22px;color:var(--gold)' }, 'Meseta Añil — Alto Mando de Johto'));
+  side.append(el('div', { class: 'muted', style: 'font-size:13px;margin-bottom:6px' }, bJ < 8 ? `Necesitas las 8 medallas de Johto (tienes ${bJ}).` : 'Vence a los cuatro miembros del Alto Mando en orden y luego al Campeón.'));
+  for (const e of C.JELITE) {
+    if (!eliteOpen(e)) { side.append(el('div', { class: 'opp-row', style: 'opacity:.5' }, el('div', { class: 'info' }, el('b', {}, e.name), ' · 🔒'))); continue; }
+    side.append(oppRow(e, () => preBattle({ kind: 'elite', t: e }), (e.boss ? '👑 ' : '') + (S.beaten[e.id] ? `✔ Vencido ${S.beaten[e.id]} vez/veces` : C.PERKS[e.perk].name)));
+    if (!S.beaten[e.id] && e.quote) side.append(el('p', { class: 'muted', style: 'font-style:italic;font-size:12.5px;margin:4px 0 0' }, `«${e.quote}»`));
+  }
+  if (S.championJ) side.append(el('p', { style: 'color:var(--gold);font-weight:700' }, '👑 Eres Campeón de Johto. Rojo te espera en el Monte Plateado...'));
 }
 
 // ---------- tienda ----------
@@ -297,15 +376,15 @@ function viewShop(v) {
   wrap.append(own);
   const grid = el('div', { class: 'shop-grid' });
   for (const s of C.SETS) {
-    const locked = S.badges.length < s.unlock;
+    const locked = setLocked(s);
     const boxPrice = s.price * 30;
     const owned = new Set(Object.keys(S.coll).filter(k => k.startsWith(s.id + '-'))).size;
     const total = P.CARDS.filter(d => d.set === s.id).length;
     grid.append(el('div', { class: 'set-card' + (locked ? ' locked' : '') },
       el('div', { class: 'box', style: `background-image:url(assets/box_${s.id}.webp)` }),
-      el('div', { class: 'body' }, el('div', {}, s.id !== 'base1' ? el('img', { class: 'sym', src: `assets/sym_${s.id}.webp`, alt: '' }) : null, ' ', el('b', { class: 'cond', style: 'font-size:19px' }, s.name)),
+      el('div', { class: 'body' }, el('div', {}, s.region === 'johto' ? el('span', { class: 'symtxt' }, s.code) : s.id !== 'base1' ? el('img', { class: 'sym', src: `assets/sym_${s.id}.webp`, alt: '' }) : null, ' ', el('b', { class: 'cond', style: 'font-size:19px' }, s.name)),
         el('div', { class: 'muted', style: 'font-size:13px' }, `Colección: ${owned}/${total} · 11 cartas por sobre, 1 rara garantizada (holo 1 de cada 3)`),
-        locked ? el('div', { class: 'bad' }, `🔒 Se desbloquea con ${s.unlock} medalla(s)`) : el('div', { class: 'row' },
+        locked ? el('div', { class: 'bad' }, setLockMsg(s)) : el('div', { class: 'row' },
           el('button', { class: 'primary', disabled: S.money < s.price ? true : null, onclick: () => buy(s, 1, s.price) }, `Sobre ₽${s.price}`),
           el('button', { disabled: S.money < s.price * 5 ? true : null, onclick: () => buy(s, 5, s.price * 5) }, `5 sobres ₽${s.price * 5}`),
           el('button', { disabled: S.money < boxPrice ? true : null, onclick: () => buy(s, 36, boxPrice) }, `Caja (36) ₽${boxPrice}`)))));
@@ -475,7 +554,8 @@ function preBattle(spec) {
   const errs = deck ? P.Decks.validate(deck.cards) : ['No tienes mazo'];
   let opp;
   const rng = Math.random;
-  if (spec.kind === 'route') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: spec.t.id };
+  if (spec.kind === 'route') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: spec.t.rival && spec.t.region === 'johto' ? C.silverDeck(spec.t, rng) : C.trainerDeck(spec.t, rng), key: spec.t.id, perk: spec.t.perk };
+  else if (spec.kind === 'elite') opp = { name: spec.t.name, portrait: spec.t.portrait, level: 5, deck: C.eliteDeck(spec.t, rng), perk: spec.t.perk, key: spec.t.id };
   else if (spec.kind === 'gymTrainer') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: 'g_' + spec.gym.id + '_' + spec.idx };
   else if (spec.kind === 'leader') opp = { name: 'Líder ' + spec.gym.leader, portrait: spec.gym.portrait, level: spec.gym.level, deck: C.leaderDeck(spec.gym, rng), perk: spec.gym.perk, key: 'L_' + spec.gym.id };
   else if (spec.kind === 'rocket') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.rocketDeck(spec.t, rng), perk: spec.t.perk, key: spec.t.id, rocket: true };
@@ -825,20 +905,28 @@ function endBattle(w) {
   const firstTime = !S.beaten[opp.key];
   if (win) {
     S.stats.wins++; S.beaten[opp.key] = (S.beaten[opp.key] || 0) + 1;
-    const unlocked = C.SETS.filter(s => S.badges.length >= s.unlock).map(s => s.id);
-    const gymSet = spec.gym ? (C.GYMS.indexOf(spec.gym) < 4 ? 'gym1' : 'gym2') : null;
+    const reg = spec.kind === 'elite' ? C.REGIONS.johto : regionOf(spec.gym || spec.t);
+    const unlocked = C.SETS.filter(s => !setLocked(s) && (s.region || 'kanto') === reg.id).map(s => s.id);
+    const gi = spec.gym ? reg.GYMS.indexOf(spec.gym) : -1;
+    const gymSet = spec.gym ? (reg.id === 'johto' ? ['neo1', 'neo1', 'neo2', 'neo2', 'neo3', 'neo3', 'neo4', 'neo4'][gi] : (gi < 4 ? 'gym1' : 'gym2')) : null;
     if (spec.kind === 'rocket') {
-      money = firstTime ? 80 * opp.level + (spec.t.boss ? 1200 : 0) : 35 * opp.level; if (firstTime) packs.base5 = spec.t.boss ? 4 : (opp.level >= 4 ? 2 : 1);
-      if (firstTime && spec.t.boss) rewards.push({ txt: '¡Derrotaste al Team Rocket! Giovanni se retira... por ahora.' });
-      else if (firstTime) { const nx = C.ROCKET[C.ROCKET.indexOf(spec.t) + 1]; if (nx) rewards.push({ txt: `El Team Rocket huye hacia ${nx.place}...` }); }
+      const rs = reg.id === 'johto' ? 'neo4' : 'base5';
+      money = firstTime ? 80 * opp.level + (spec.t.boss ? 1200 : 0) : 35 * opp.level; if (firstTime) packs[rs] = spec.t.boss ? 4 : (opp.level >= 4 ? 2 : 1);
+      if (firstTime && spec.t.boss) rewards.push({ txt: reg.id === 'johto' ? '¡Liberaste la Torre Radio! El Team Rocket se disuelve... ¿para siempre?' : '¡Derrotaste al Team Rocket! Giovanni se retira... por ahora.' });
+      else if (firstTime) { const nx = reg.ROCKET[reg.ROCKET.indexOf(spec.t) + 1]; if (nx) rewards.push({ txt: `El Team Rocket huye hacia ${nx.place}...` }); }
     }
-    else if (spec.kind === 'route') { money = firstTime ? 60 + 50 * opp.level : 30 + 30 * opp.level; if (firstTime) { const s = unlocked[Math.floor(Math.random() * unlocked.length)]; packs[s] = 1; } }
+    else if (spec.kind === 'elite') {
+      const e = spec.t; money = firstTime ? (e.boss ? 3000 : 700) : 300; const s = unlocked[Math.floor(Math.random() * unlocked.length)] || 'neo1'; packs[s] = firstTime ? (e.boss ? 0 : 2) : 1;
+      if (e.boss) { packs.neo4 = (packs.neo4 || 0) + (S.championJ ? 2 : 5); if (!S.championJ) rewards.push({ txt: '👑 ¡Eres el nuevo Campeón de Johto! Dicen que alguien te espera en el Monte Plateado...' }); S.championJ = true; }
+      else if (firstTime) { const nx = C.JELITE[C.JELITE.indexOf(e) + 1]; if (nx) rewards.push({ txt: `Siguiente: ${nx.name}` }); }
+    }
+    else if (spec.kind === 'route') { money = firstTime ? 60 + 50 * opp.level + (spec.t.boss ? 1500 : 0) : 30 + 30 * opp.level; if (firstTime) { const s = unlocked[Math.floor(Math.random() * unlocked.length)] || (reg.id === 'johto' ? 'neo1' : 'base1'); packs[s] = spec.t.boss ? 4 : 1; } if (firstTime && spec.t.boss) rewards.push({ txt: 'Rojo asiente en silencio y desaparece en la nieve...' }); }
     else if (spec.kind === 'gymTrainer') { money = firstTime ? 90 * opp.level : 40 * opp.level; if (firstTime) packs[gymSet] = 1; }
     else if (spec.kind === 'leader') {
-      const g = spec.gym; money = S.badges.includes(g.id) ? 250 : 600; packs[gymSet] = S.badges.includes(g.id) ? 1 : 3;
-      if (!S.badges.includes(g.id)) { S.badges.push(g.id); rewards.push({ badge: g.badge, txt: `¡Obtuviste la ${g.badgeEs}!` }); const ns = C.SETS.find(s => s.unlock === S.badges.length); if (ns) rewards.push({ txt: `Nuevo set en la tienda: ${ns.name}` }); }
+      const g = spec.gym; const B = badgesOf(reg); money = B.includes(g.id) ? 250 : (reg.id === 'johto' ? 800 : 600); packs[gymSet] = B.includes(g.id) ? 1 : 3;
+      if (!B.includes(g.id)) { B.push(g.id); rewards.push({ badge: g.badge, txt: `¡Obtuviste la ${g.badgeEs}!` }); if (reg.id === 'kanto' && B.length === 8) rewards.push({ txt: '🚢 ¡Ahora puedes viajar a Johto! Búscalo en el mapa.' }); const ns = C.SETS.find(s => (s.region || 'kanto') === reg.id && s.unlock === B.length); if (ns) rewards.push({ txt: `Nuevo set en la tienda: ${ns.name}` }); }
     } else { money = S.champion ? 600 : 2000; packs.base5 = S.champion ? 2 : 5; if (!S.champion) rewards.push({ txt: '👑 ¡Eres el nuevo Campeón de la Liga Pokémon de Kanto!' }); S.champion = true; }
-    if (spec.kind === 'leader' || spec.kind === 'league' || (spec.t && spec.t.boss && firstTime) || Math.random() < 0.35) { const locked = []; for (let i = 0; i < COIN_COUNT; i++) if (!S.coins.includes(i)) locked.push(i); if (locked.length) { const c = locked[Math.floor(Math.random() * locked.length)]; S.coins.push(c); rewards.push({ coin: c, txt: '¡Nueva moneda desbloqueada!' }); } }
+    if (spec.kind === 'leader' || spec.kind === 'league' || (spec.kind === 'elite' && firstTime) || (spec.t && spec.t.boss && firstTime) || Math.random() < 0.35) { const locked = []; for (let i = 0; i < COIN_COUNT; i++) if (!S.coins.includes(i)) locked.push(i); if (locked.length) { const c = locked[Math.floor(Math.random() * locked.length)]; S.coins.push(c); rewards.push({ coin: c, txt: '¡Nueva moneda desbloqueada!' }); } }
   } else { S.stats.losses++; money = 20; }
   S.money += money; for (const [k, n] of Object.entries(packs)) S.packs[k] = (S.packs[k] || 0) + n;
   save();

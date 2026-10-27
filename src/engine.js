@@ -2,7 +2,7 @@
 // Funciona en navegador y en Node (para pruebas IA vs IA).
 (function (root) {
 'use strict';
-const T = { G: 'Planta', R: 'Fuego', W: 'Agua', L: 'Rayo', P: 'Psíquico', F: 'Lucha', C: 'Incoloro' };
+const T = { G: 'Planta', R: 'Fuego', W: 'Agua', L: 'Rayo', P: 'Psíquico', F: 'Lucha', C: 'Incoloro', D: 'Siniestro', M: 'Metálico' };
 const STATUS_ES = { asleep: 'Dormido', confused: 'Confundido', paralyzed: 'Paralizado', poisoned: 'Envenenado' };
 let UID = 1;
 const DB = {};          // id -> definición
@@ -34,6 +34,26 @@ const FX_LABEL = {
   noEnergy: { ico: '🚫', short: 'SIN ENERGÍA', long: 'no podrá recibir Energía en el próximo turno' },
   powerOff: { ico: '🚫', short: 'SIN PODER', long: 'tiene su Poder Pokémon anulado' },
   boost: { ico: '⬆', short: 'POTENCIADO', long: 'tendrá un ataque potenciado en tu próximo turno' },
+  endure: { ico: '💪', short: 'AGUANTE', long: 'no quedará Fuera de Combate por un ataque en el próximo turno (queda con 10 PS)' },
+  armorUp: { ico: '💪', short: 'BLINDAJE', long: 'lanzará una moneda si fuera a quedar Fuera de Combate: con cara queda con 10 PS' },
+  screech: { ico: '🔊', short: '+20 DAÑO', long: 'recibirá 20 de daño más de los ataques hasta el final del próximo turno' },
+  noStatus: { ico: '✨', short: 'SIN ESTADOS', long: 'no puede quedar Dormido, Confundido, Paralizado ni Envenenado' },
+  noEffects: { ico: '✨', short: 'SIN EFECTOS', long: 'no se verá afectado por efectos de ataques (salvo el daño) en el próximo turno' },
+  noEvolve: { ico: '🚫', short: 'NO EVOLUCIONA', long: 'no podrá evolucionar en el próximo turno' },
+  pursuit: { ico: '⛓', short: 'PERSECUCIÓN', long: 'recibirá 10 de daño si intenta retirarse' },
+  slime: { ico: '💧', short: 'BABA', long: 'obliga al rival a lanzar moneda: con cruz no recibe daño del ataque' },
+  dodge: { ico: '💨', short: 'ESQUIVA', long: 'lanzará una moneda al ser atacado: con cara evita el daño' },
+  reflect: { ico: '🪞', short: 'REFLEJO', long: 'lanzará una moneda al ser atacado: con cara evita el daño y devuelve 20' },
+  weakened: { ico: '⬇', short: v => '−' + v + ' ATQ', long: v => `hará ${v} de daño menos con sus ataques (antes de Debilidad y Resistencia)` },
+  harden20: { ico: '🛡', short: 'EVITA ≤20', long: 'evitará cualquier daño de 20 o menos durante el próximo turno del rival' },
+  guard30: { ico: '🛡', short: 'EVITA ≥30', long: 'evitará cualquier daño de 30 o más durante el próximo turno del rival' },
+  secrete: { ico: '☠', short: 'VENENO REACTIVO', long: 'envenenará al atacante y dañará su Banca si es atacado' },
+  noSwitch: { ico: '⛓', short: 'ATRAPADO', long: 'no puede retirarse ni ser cambiado por efectos' },
+  triggered: { ico: '☠', short: 'TRAMPA', long: 'quedará Envenenado si se le une una Energía' },
+  lockOn: { ico: '🎯', short: 'BLANCO FIJADO', long: 'tratará las cruces de Rayo Eléctrico como caras en su próximo turno' },
+  retreatPlus: { ico: '⛓', short: '+1 RETIRADA', long: 'pagará 1 Energía más para retirarse' },
+  benchShield: { ico: '🛡', short: 'PROTEGE BANCA', long: 'protegerá a su Banca del daño de ataques' },
+  dropZero: { ico: '🎯', short: 'MIRADA', long: 'quedará Fuera de Combate si sigue Dormido (Canto Mortal)' },
 };
 class GameOver extends Error { constructor(w) { super('over'); this.winner = w; } }
 
@@ -141,6 +161,18 @@ class Game {
       for (const s of this.slots(p)) if (s !== slot && this.baseDef(s).st === 'P' && this.baseDef(s).types.includes('P'))
         this.baseDef(s).atk.forEach((a, i) => e.atk.push(Object.assign({ src: this.baseDef(s).id, idx: i, psylink: true }, a)));
     }
+    if (this.stadiumIs("Rocket's Hideout") && e.name.indexOf('Dark ') === 0) e.hp += 20;
+    { const pk = this.ownerOf(slot).perk; if (pk === 'clair' || pk === 'lance') e.hp += 20; }
+    if (slot.fx.submerge) e.types = ['W'];
+    // Mimetismo (Sudowoodo)
+    if (d.pw && d.pw.name === 'Mimic' && this.isActive(slot) && !this.statusBlocksPower(slot) && this.powerOn(slot)) {
+      const t = this.opp(this.ownerOf(slot)).active;
+      if (t && this.baseDef(t).st === 'P') this.baseDef(t).atk.forEach((a, i) => e.atk.push(Object.assign({ src: this.baseDef(t).id, idx: i, mimic: true }, a)));
+    }
+    // Memoria Prehistórica (Aerodactyl) / Memoria Genética
+    if (slot.cards.length > 1 && this.anyPower('Prehistoric Memory').length) {
+      slot.cards.slice(0, -1).forEach(c => { const cd = this.def(c); if (cd.st === 'P') cd.atk.forEach((a, i) => e.atk.push(Object.assign({ src: cd.id, idx: i, recall: true }, a))); });
+    }
     // Recordar (Recall)
     if (this.ownerOf(slot).flags.recall && this.isActive(slot)) {
       slot.cards.slice(0, -1).forEach(c => { const cd = this.def(c); if (cd.st === 'P') cd.atk.forEach((a, i) => e.atk.push(Object.assign({ src: cd.id, idx: i, recall: true }, a))); });
@@ -148,6 +180,23 @@ class Game {
     return e;
   }
   hp(slot) { return this.eff(slot).hp; }
+  miraculousWind() { return this.p.some(pl => pl.active && this.powerActive(pl.active, 'Miraculous Wind')); }
+  isBaby(slot) { return !!this.baseDef(slot).baby; }
+  isDarkMon(slot) { const e = this.eff(slot); return e.types.includes('D') || e.name.indexOf('Dark ') === 0; }
+  tool(slot) { return slot.att.find(c => { const d = this.def(c); return d.sub && d.sub.includes('Pokémon Tool'); }); }
+  discardAtt(slot, c) { this.removeFrom(slot.att, c); this.toDiscard(c); }
+  effectsBlocked(t, byPlayer) { if (!t || t.owner === byPlayer.i) return false; return !!(t.fx.noEffects || this.powerActive(t, 'Crystal Body')); }
+  uniquePower(p, name) { const l = this.slots(p).filter(s => this.baseDef(s).pw && this.baseDef(s).pw.name === name); return l.length === 1 && this.powerActive(l[0], name) ? l[0] : null; }
+  async evolveFromDeck(p, s, pred, title) {
+    const bd = this.baseDef(s);
+    const opts = p.deck.filter(c => { const d = this.def(c); return d.st === 'P' && d.stage > 0 && d.from === bd.name && (!pred || pred(d)); });
+    if (!opts.length) { this.shuffleDeck(p); return false; }
+    const [c] = await this.ask(p, { kind: 'cards', title: title || 'Elige la evolución', cards: opts, min: 0, max: 1, purpose: 'evolveFromDeck', fromDeck: true });
+    this.shuffleDeck(p);
+    if (!c) return false;
+    this.removeFrom(p.deck, c); p.hand.push(c);
+    return this.evolve(p, c, s, true);
+  }
   hpLeft(slot) { return this.hp(slot) - slot.dmg; }
   counters(slot) { return slot.dmg / 10; }
 
@@ -158,6 +207,7 @@ class Game {
     if (!d.pw) return false;
     if (this.powersOff >= this.turnNo) return false;
     if (slot.fx.powerOff) return false;
+    if (d.baby) { const o = this.opp(this.ownerOf(slot)); if (o.active && o.active !== slot && this.baseDef(o.active).pw && this.baseDef(o.active).pw.name === 'Scare' && !this.statusBlocksPower(o.active) && this.powersOff < this.turnNo) return false; }
     if (d.pw.name !== 'Toxic Gas') {
       for (const s of this.allSlots()) {
         const sd = this.baseDef(s);
@@ -185,14 +235,20 @@ class Game {
     const burn = slot.flags_burn === this.turnNo && this.powerActive(slot, 'Energy Burn');
     const photo = this.powerActive(slot, 'Photosynthesis');
     const ditto = this.eff(slot).ditto;
+    const wind = this.miraculousWind();
+    const grow = this.baseDef(slot).st === 'P' && this.eff(slot).types.includes('G') && this.findPower(this.ownerOf(slot), 'Wild Growth').length > 0;
     for (const c of slot.energy) {
       const d = this.def(c);
       let prov;
       if (c.buzzap) prov = [c.buzzap, c.buzzap];
       else if (d.name === 'Double Colorless Energy') prov = ['C', 'C'];
       else if (d.name === 'Rainbow Energy') prov = ['A'];
-      else if (d.basic) prov = [d.etype];
+      else if (d.name === 'Miracle Energy') prov = ['A', 'A'];
+      else if (c.conv && c.convT === this.turnNo) prov = [c.conv];
+      else if (d.etype) prov = [d.etype];
       else prov = ['C'];
+      if (!d.basic && d.name !== 'Double Colorless Energy' && wind) prov = ['C'];
+      if (d.name === 'Grass Energy' && grow) prov = ['G', 'G'];
       if (burn) prov = prov.map(() => 'R');
       if (photo) prov = prov.map(() => 'G');
       if (ditto) prov = prov.map(() => 'A');
@@ -206,7 +262,7 @@ class Game {
     return t.filter(x => x === type || x === 'A').length;
   }
   energyCardsOf(slot, type) { // cartas de energía de un tipo
-    return slot.energy.filter(c => { const d = this.def(c); if (!type) return true; if (c.buzzap) return c.buzzap === type; if (d.name === 'Rainbow Energy') return true; return d.basic && d.etype === type; });
+    return slot.energy.filter(c => { const d = this.def(c); if (!type) return true; if (c.buzzap) return c.buzzap === type; if (d.name === 'Rainbow Energy' || d.name === 'Miracle Energy') return true; if (c.conv && c.convT === this.turnNo) return c.conv === type; return d.etype === type; });
   }
   canPay(cost, tokens) {
     const pool = tokens.slice(); const need = cost.filter(x => x !== 'C'); let col = cost.length - need.length;
@@ -228,6 +284,10 @@ class Game {
     const o = this.opp(p);
     if (o.active && this.powerActive(o.active, 'Sticky Goo')) c += 2;
     c -= this.findPower(p, 'Retreat Aid', 'bench').length;
+    if (this.stadiumIs('Broken Ground Gym') && this.eff(slot).stage === 0) c += 1;
+    if (this.opp(p).perk === 'morty') c += 1;
+    if (slot.fx.retreatPlus) c += 1;
+    if (this.eff(slot).name.indexOf('Unown') === 0 && p.bench.some(s => this.baseDef(s).pw && this.baseDef(s).pw.name === '[Zoom]' && this.powerOn(s))) c = 0;
     return Math.max(0, c);
   }
 
@@ -239,7 +299,11 @@ class Game {
     if (p.active === slot) p.active = null; else p.bench = p.bench.filter(s => s !== slot);
   }
   discardSlot(slot) { const p = this.ownerOf(slot); this.removeSlot(slot); for (const c of this.slotCards(slot)) { delete c.buzzap; this.toDiscard(c); } }
-  toDiscard(c) { const p = this.p[c.owner]; p.discard.push(c); }
+  toDiscard(c) {
+    const p = this.p[c.owner];
+    if (c.inPlay) { delete c.inPlay; delete c.conv; if (this.def(c).name === 'Recycle Energy' && !this.miraculousWind()) { p.hand.push(c); this.log('La Energía Reciclaje vuelve a la mano.'); return; } }
+    p.discard.push(c);
+  }
   shuffleSlotIntoDeck(slot) { const p = this.ownerOf(slot); this.removeSlot(slot); for (const c of this.slotCards(slot)) { if (c.buzzap) { delete c.buzzap; } this.p[c.owner].deck.push(c); } shuffle(p.deck, this.rnd); }
   returnSlotToHand(slot, energyToo = true) { const p = this.ownerOf(slot); this.removeSlot(slot); for (const c of slot.cards) p.hand.push(c); for (const c of slot.energy) { if (energyToo && !c.buzzap) p.hand.push(c); else { delete c.buzzap; this.toDiscard(c); } } for (const c of slot.att) this.toDiscard(c); }
   draw(p, n = 1) { let k = 0; while (k < n && p.deck.length) { p.hand.push(p.deck.pop()); k++; } return k; }
@@ -249,11 +313,17 @@ class Game {
   async switchActive(p, benchSlot, why) {
     if (!benchSlot || !p.bench.includes(benchSlot)) return;
     const old = p.active;
+    if (old && old.fx.noSwitch && why !== 'retreat' && why !== 'force') { this.log(`${this.nm(old)} está atrapado: el cambio no tiene efecto.`); return; }
+    // Charco de Magma (Magcargo)
+    if (old && this.powerActive(old, 'Magma Pool')) { const f = old.energy.find(c => this.def(c).name === 'Fire Energy'); if (f) { this.removeFrom(old.energy, f); benchSlot.energy.push(f); this.log('Charco de Magma pasa una Energía Fuego al nuevo Activo.'); } }
     p.bench = p.bench.filter(s => s !== benchSlot);
     p.active = benchSlot;
     if (old) { this.clearOnBench(old); p.bench.push(old); }
     if (old) this.log(`${p.name}: ${this.nm(old)} se retira a la banca; ${this.nm(benchSlot)} pasa a ser Activo.`);
     else this.log(`${p.name}: ${this.nm(benchSlot)} pasa a ser Activo.`);
+    // Púas (Forretress): durante el turno del rival del dueño de Forretress
+    const o = this.opp(p);
+    if (this.cur === p.i && this.findPower(o, 'Spikes').length) { benchSlot.dmg += 10; this.log(`Púas hace 10 de daño a ${this.nm(benchSlot)}.`); }
   }
   nm(slot) { return slot ? this.eff(slot).nameEs : '—'; }
   cn(c) { return this.def(c).nameEs; }
@@ -262,6 +332,7 @@ class Game {
   canBeStatused(slot) {
     if (this.eff(slot).trainerMon) return false;
     if (this.powerActive(slot, 'Thick Skinned')) return false;
+    if (slot.fx.noStatus) return false;
     return true;
   }
   setStatus(slot, s, by) {
@@ -287,6 +358,10 @@ class Game {
     const atkSlot = x.att; const ae = x.e; const te = this.eff(target);
     const toActive = this.isActive(target) && target.owner !== atkSlot.owner;
     let d = amount;
+    // Energía Metálica en un atacante no Metálico / Encanto (antes de D/R)
+    if (!opts.raw && !this.miraculousWind()) { const mN = atkSlot.energy.filter(c => this.def(c).name === 'Metal Energy').length; if (mN && !ae.types.includes('M')) d -= 10 * mN; }
+    if (atkSlot.fx.weakened && toActive) d -= atkSlot.fx.weakened.v;
+    d = Math.max(0, d);
     if (opts.wr !== false && toActive) {
       if (x.perkBonus) d += x.perkBonus;
       const ignoreWeak = this.stadiumIs('Cinnabar City Gym') && ae.types.includes('W') && te.name.indexOf('Blaine') >= 0;
@@ -301,7 +376,10 @@ class Game {
       d += 10 * atkSlot.att.filter(c => this.def(c).name === 'PlusPower').length;
       if (x.me.flags.misty && ae.name.indexOf('Misty') >= 0) d += 20;
       if (x.vermilion) d += 10;
+      if (!this.miraculousWind()) d += 10 * atkSlot.energy.filter(c => this.def(c).name === 'Darkness Energy').length;
+      if (x.bonusAfter) d += x.bonusAfter;
     }
+    if (d > 0 && target.fx.screech && target.owner !== atkSlot.owner) d += 20;
     // reducciones del defensor
     const tp = this.ownerOf(target);
     if (opts.pierce || (x.pierce && x.isMainTarget(target))) { d = r10(d); target.dmg += d; if (d > 0) x.damaged.push([target, d]); return d; }
@@ -309,6 +387,12 @@ class Game {
     if (target.fx.preventAll || target.fx.immune) d = 0;
     if (target.fx.preventDmgFrom && target.fx.preventDmgFrom.v === atkSlot.u) d = 0;
     if (target.fx.harden && d <= 30) d = 0;
+    if (target.fx.harden20 && d <= 20) d = 0;
+    if (target.fx.guard30 && d >= 30) d = 0;
+    if (!this.isActive(target) && target.owner !== atkSlot.owner && tp.flags.benchShield && tp.active && tp.active.u === tp.flags.benchShield.slot && tp.flags.benchShield.until >= this.turnNo) d = 0;
+    if (!this.miraculousWind()) d -= 10 * target.energy.filter(c => this.def(c).name === 'Metal Energy').length;
+    if (this.stadiumIs('Sprout Tower') && ae.types.includes('C')) d -= 30;
+    if (target.owner !== atkSlot.owner) for (const [pw, ty] of [['[Darkness]', 'D'], ['[Metal]', 'M'], ['[Normal]', 'C']]) if (ae.types.includes(ty)) { const u = this.slots(tp).filter(s => this.baseDef(s).pw && this.baseDef(s).pw.name === pw); if (u.length === 1 && this.powerOn(u[0])) d -= 30; }
     if (target.fx.reduce) d -= target.fx.reduce.v;
     if (target.fx.reduceFrom && target.fx.reduceFrom.v.from === atkSlot.u) d -= target.fx.reduceFrom.v.n;
     if (target.fx.halve) d = floor10(d / 2);
@@ -318,9 +402,10 @@ class Game {
     if (this.powerActive(target, 'Kabuto Armor')) d = floor10(d / 2);
     if (this.powerActive(target, 'Strange Barrier') && ae.stage === 0 && d >= 20) d = 10;
     if (this.powerActive(target, 'Shell Armor')) d = Math.max(0, d - 10);
+    if (this.powerActive(target, 'Hard Shell') && d > 0 && d <= 40) d = 10;
     const iv = this.findPower(tp, 'Relaxing Scent', 'active'); if (iv.length) d = ceil10(d / 2);
     const iv2 = this.findPower(this.ownerOf(atkSlot), 'Relaxing Scent', 'active'); if (iv2.length && iv2[0] !== iv[0]) d = ceil10(d / 2);
-    if (tp.perk === 'brock' && d > 0) d = Math.max(0, d - 10);
+    if ((tp.perk === 'brock' || tp.perk === 'jasmine') && d > 0) d = Math.max(0, d - 10);
     if (x.charity && target === x.def) d = Math.max(0, d - x.charity);
     // Bench Guard (Rhydon de Brock)
     if (!this.isActive(target) && d > 0) {
@@ -369,7 +454,7 @@ class Game {
         const bs = await this.ask(p, { kind: 'cards', title: 'Elige Pokémon Básicos para tu Banca (opcional)', cards: rest, min: 0, max: Math.min(5, rest.length), purpose: 'setupBench' });
         for (const c of bs) { this.removeFrom(p.hand, c); const s = this.mkSlot(p, c); s.played = 0; p.bench.push(s); }
       }
-      const np = (p.perk === 'giovanni' || p.perk === 'rocket') ? 5 : 6;
+      const np = ['giovanni', 'rocket', 'lance', 'red'].includes(p.perk) ? 5 : 6;
       for (let k = 0; k < np; k++) p.prizes.push(p.deck.pop());
     }
     // ventaja Blaine: energía de fuego gratis
@@ -398,9 +483,10 @@ class Game {
     this.turnNo++;
     p.energyPlayed = false; p.retreated = false; p.used = {}; p.forceEnd = false; p.mistyExtra = false; p.attacked = false; p.flags.misty = false; p.flags.koga = false; p.flags.recall = false; p.flags.blaine = false; p.flags.giovanni = null; p.extraEnergy = 0;
     this.log(`— Turno ${this.turnNo}: ${p.name} —`);
+    this.berries();
     if (!p.deck.length) this.win(o.i, `${p.name} no puede robar carta.`);
     this.draw(p, 1);
-    if (p.perk === 'sabrina' && p.deck.length) { this.draw(p, 1); }
+    if ((p.perk === 'sabrina' || p.perk === 'karen') && p.deck.length) { this.draw(p, 1); }
     // devolver mano apartada (Máquina de Cosquillas) – se devuelve al final de su turno
     this.upd();
     p.turnOver = false;
@@ -409,8 +495,27 @@ class Game {
     this.check();
     await this.endTurn(p);
   }
+  berries() {
+    for (const s of this.allSlots()) {
+      if (this.isActive(s) && this.powerActive(s, 'Legendary Body')) for (const c of s.att.slice()) if (this.isTrainer(c)) { this.discardAtt(s, c); this.log('Cuerpo Legendario descarta un Entrenador unido.'); }
+      const t = this.tool(s); if (!t) continue; const n = this.def(t).name;
+      if (n === 'Berry' && s.dmg >= 20) { s.dmg -= 20; this.discardAtt(s, t); this.log(`La Baya cura 20 a ${this.nm(s)}.`); }
+      if (n === 'Gold Berry' && s.dmg >= 40) { s.dmg -= 40; this.discardAtt(s, t); this.log(`La Baya Dorada cura 40 a ${this.nm(s)}.`); }
+      if (n === 'Miracle Berry' && (s.st || s.poison)) { this.cure(s); this.discardAtt(s, t); this.log(`La Baya Milagro cura los estados de ${this.nm(s)}.`); }
+    }
+  }
   async endTurn(p) {
     const o = this.opp(p);
+    // Energía Milagro y Lupa se descartan al final del turno de su dueño
+    for (const s of this.slots(p)) {
+      for (const c of s.energy.slice()) if (this.def(c).name === 'Miracle Energy') { this.removeFrom(s.energy, c); this.toDiscard(c); this.log('Se descarta la Energía Milagro.'); }
+      for (const c of s.att.slice()) if (this.def(c).name === 'Magnifier') this.discardAtt(s, c);
+      if (s.fx.submerge) delete s.fx.submerge;
+    }
+    // Energía Siniestra: 1 contador a los Pokémon que no son Siniestros
+    if (!this.miraculousWind()) for (const s of this.allSlots()) { const n = s.energy.filter(c => this.def(c).name === 'Darkness Energy').length; if (n && !this.isDarkMon(s)) { s.dmg += 10 * n; this.log(`La Energía Siniestra daña a ${this.nm(s)} (${10 * n}).`); } }
+    // Contadores de Chamuscar
+    for (const s of this.allSlots()) if (s.persist.char) { const r = await this.flip(this.ownerOf(s), 1, `Chamuscar en ${this.nm(s)}`); if (!r[0]) { s.dmg += 20; this.log(`Chamuscar hace 20 de daño a ${this.nm(s)}.`); } }
     // descartar PlusPower, ESP, devolver Charity
     for (const s of this.slots(p)) for (const c of s.att.slice()) {
       const n = this.def(c).name;
@@ -421,6 +526,7 @@ class Game {
     for (const pl of this.p) for (const s of this.slots(pl)) for (const c of s.att.slice()) if (this.def(c).name === 'Defender' && c.until <= this.turnNo) { this.removeFrom(s.att, c); this.toDiscard(c); }
     if (p.setAside.length && p.setAsideUntil <= this.turnNo) { p.hand.push(...p.setAside); p.setAside = []; }
     if (o.setAside.length && o.setAsideUntil <= this.turnNo) { o.hand.push(...o.setAside); o.setAside = []; }
+    if (p.perk === 'whitney' && p.active && p.active.dmg) { this.heal(p.active, 20); this.log('Leche Mu-mu de Blanca cura a su Pokémon Activo.'); }
     if (p.perk === 'erika') { let h = 0; for (const s of this.slots(p)) h += this.heal(s, 10); if (h) this.log('Aroma Floral de Erika cura a sus Pokémon.'); }
     // revisión Pokémon (entre turnos)
     for (const pl of [p, o]) {
@@ -429,7 +535,7 @@ class Game {
     }
     for (const pl of [p, o]) {
       const s = pl.active; if (!s) continue;
-      if (s.st === 'asleep') { const r = await this.flip(pl, 1, `¿${this.nm(s)} despierta?`); if (r[0]) { s.st = null; this.log(`${this.nm(s)} se despierta.`); } else this.log(`${this.nm(s)} sigue dormido.`); }
+      if (s.st === 'asleep') { const deep = this.anyPower('Deep Sleep').length > 0; const rr = await this.flip(pl, deep ? 2 : 1, `¿${this.nm(s)} despierta?${deep ? ' (Sueño Profundo)' : ''}`); const r = [rr.every(v => v)]; if (r[0]) { s.st = null; this.log(`${this.nm(s)} se despierta.`); } else this.log(`${this.nm(s)} sigue dormido.`); }
     }
     if (p.active && p.active.st === 'paralyzed' && p.active.parT < this.turnNo) { p.active.st = null; this.log(`${this.nm(p.active)} ya no está paralizado.`); }
     // Escapar (Primeape de Brock)
@@ -437,6 +543,7 @@ class Game {
     // expirar efectos
     for (const s of this.allSlots()) for (const k of Object.keys(s.fx)) if (s.fx[k] && s.fx[k].until <= this.turnNo) delete s.fx[k];
     for (const pl of this.p) for (const k of Object.keys(pl.flags)) if (typeof pl.flags[k] === 'object' && pl.flags[k] && pl.flags[k].until <= this.turnNo) delete pl.flags[k];
+    this.berries();
     await this.resolveKOs(null);
     this.firstTurn[p.i] = false;
     this.cur = o.i;
@@ -490,6 +597,7 @@ class Game {
     const s = this.mkSlot(p, c);
     if (!p.active) p.active = s; else p.bench.push(s);
     this.log(`${p.name} pone a ${this.cn(c)} en juego.`);
+    if (s !== p.active && this.def(c).st === 'P') for (const pl of this.p) if (pl.active && this.powerActive(pl.active, 'Hot Plate')) { s.dmg += 10; this.log(`Plancha Ardiente hace 10 de daño a ${this.cn(c)}.`); break; }
     if (this.stadiumIs("Rocket's Minefield Gym")) { const r = await this.flip(p, 1, 'Gimnasio Minado: ¿cruz = 10 de daño?'); if (!r[0]) { s.dmg += 10; this.log('El Gimnasio Minado del Team Rocket daña al Pokémon (10).'); } }
     await this.onPlayPower(p, s);
     await this.resolveKOs(null); this.upd(); return true;
@@ -500,16 +608,22 @@ class Game {
   }
   // --- evolución ---
   evoTargets(p, c, ignoreTiming) {
-    if (!this.isEvoCard(c)) return [];
     const d = this.def(c);
+    if (d.st === 'P' && d.stage === 0) { // Evolución de Bebé
+      if (this.anyPower('Prehistoric Power').length) return [];
+      const o = this.opp(p); const scared = o.active && this.powerActive(o.active, 'Scare');
+      return this.slots(p).filter(s => { const bd = this.baseDef(s); return bd.baby && (bd.babyTo || []).includes(d.name) && !scared && !this.statusBlocksPower(s) && !s.fx.noEvolve; });
+    }
+    if (!this.isEvoCard(c)) return [];
     if (this.anyPower('Prehistoric Power').length) return [];
     return this.slots(p).filter(s => {
       const bd = this.baseDef(s);
       if (bd.st !== 'P' && bd.name !== 'Mysterious Fossil') return false;
       if (bd.pw && bd.pw.name === 'Transform' && this.isActive(s)) return false;
       if (bd.name !== d.from) return false;
+      if (s.fx.noEvolve && !ignoreTiming) return false;
       if (ignoreTiming) return true;
-      const gio = (p.flags.giovanni && p.flags.giovanni === s.u) || (p.perk === 'giovanni' && bd.name.indexOf('Giovanni') >= 0 && !this.firstTurn[p.i]) || (p.perk === 'rocket' && d.name.startsWith('Dark ') && !this.firstTurn[p.i]);
+      const gio = (p.flags.giovanni && p.flags.giovanni === s.u) || (p.perk === 'giovanni' && bd.name.indexOf('Giovanni') >= 0 && !this.firstTurn[p.i]) || (p.perk === 'rocket' && d.name.startsWith('Dark ') && !this.firstTurn[p.i]) || (p.perk === 'bugsy' && d.types.includes('G') && !this.firstTurn[p.i]);
       if (gio) return true;
       if (this.firstTurn[p.i] || s.played === this.turnNo || s.evolved === this.turnNo) return false;
       return true;
@@ -520,7 +634,9 @@ class Game {
     if (!free && !this.canEvolve(p, c, s)) return false;
     if (p.hand.includes(c)) this.removeFrom(p.hand, c);
     const from = this.nm(s);
+    const wasBaby = this.baseDef(s).baby;
     s.cards.push(c); s.evolved = this.turnNo; s.st = null; s.poison = 0; s.fx = {};
+    if (wasBaby) { s.dmg = 0; this.log('Evolución de Bebé: se retiran todos los contadores de daño.'); }
     if (p.flags.giovanni === s.u) {} // continúa aplicando
     this.log(`${p.name} evoluciona a ${from} en ${this.cn(c)}.`);
     if (this.stadiumIs('Viridian City Gym') && this.hasName(s, 'Giovanni')) this.heal(s, 20);
@@ -532,6 +648,7 @@ class Game {
     if (!this.canAct(p) || !p.hand.includes(c) || !this.isEnergy(c) || !this.slots(p).includes(s)) return false;
     if (s.fx.noEnergy) return false;
     if (this.eff(s).trainerMon) return false;
+    if (this.def(c).name === 'Miracle Energy' && !/^(Shining|Light) /.test(this.eff(s).name)) return false;
     if (!p.energyPlayed) return true;
     // Danza Lluvia
     const d = this.def(c);
@@ -558,21 +675,43 @@ class Game {
     if (d.name === 'Full Heal Energy') { this.cure(s); }
     if (d.name === 'Potion Energy') this.heal(s, 10);
     if (d.name === 'Fire Energy' && this.powerActive(s, 'Healing Fire')) this.heal(s, 10);
+    c.inPlay = true;
+    await this.onAttachEnergy(p, c, s);
     await this.resolveKOs(null); this.upd(); return true;
+  }
+  async onAttachEnergy(p, c, s) {
+    const d = this.def(c); const o = this.opp(p);
+    // Conductividad (Ampharos Oscuro del rival)
+    const amp = this.uniquePower(o, 'Conductivity'); if (amp) { s.dmg += 10; this.log(`Conductividad hace 10 de daño a ${this.nm(s)}.`); }
+    if (s.fx.triggered) { this.setStatus(s, 'poisoned'); }
+    // Estallido Relámpago (Raikou)
+    if (d.name === 'Lightning Energy' && this.powerActive(s, 'Lightning Burst') && o.bench.length && o.active) { const n = await this.ask(o, { kind: 'slot', title: 'Estallido Relámpago: elige tu nuevo Pokémon Activo', options: o.bench.slice(), purpose: 'newActive' }); await this.switchActive(o, n || o.bench[0]); }
+    // Evolución por Energía (Eevee)
+    if (this.powerActive(s, 'Energy Evolution') && d.etype) {
+      const r = await this.flip(p, 1, 'Evolución por Energía');
+      if (r[0]) await this.evolveFromDeck(p, s, ed => ed.types.includes(d.etype), 'Evolución por Energía: elige la evolución');
+    }
   }
   // --- retirada ---
   canRetreat(p, bench) {
     if (!this.canAct(p) || p.retreated || !p.active || !p.bench.length) return false;
     const s = p.active;
     if (s.st === 'asleep' || s.st === 'paralyzed') return false;
-    if (s.fx.noRetreat) return false;
+    if (s.fx.noRetreat || s.fx.noSwitch) return false;
     const cost = this.retreatCost(s);
+    if (s.att.some(c => this.def(c).name === 'Balloon Berry')) return true;
     if (cost > 50) return false;
     return this.energyTokens(s).length >= cost;
   }
   async retreat(p, bench) {
     if (!this.canRetreat(p) || !p.bench.includes(bench)) return false;
     const s = p.active; let cost = this.retreatCost(s);
+    const balloon = s.att.find(c => this.def(c).name === 'Balloon Berry');
+    if (balloon) { this.discardAtt(s, balloon); this.log('Se descarta la Baya Globo en lugar de Energía.'); cost = 0; }
+    const o0 = this.opp(p);
+    if (s.fx.pursuit) { s.dmg += 10; this.log(`Persecución hace 10 de daño a ${this.nm(s)}.`); }
+    if (o0.active && this.powerActive(o0.active, '[Chase]')) { const r = await this.flip(o0, 1, '[Cazar]'); if (r[0]) { s.dmg += 10; this.log(`[Cazar] pone un contador en ${this.nm(s)}.`); } }
+    if (s.dmg >= this.hp(s)) { await this.resolveKOs(null); this.upd(); return true; }
     if (cost > 0) {
       const chosen = await this.chooseEnergyToPay(p, s, cost, 'Elige energía para pagar la retirada');
       if (!chosen) return false;
@@ -583,7 +722,7 @@ class Game {
       const r = await this.flip(p, 1, `${this.nm(s)} está confundido: ¿puede retirarse?`);
       if (!r[0]) { this.log('Cruz: no puede retirarse.'); this.upd(); return true; }
     }
-    await this.switchActive(p, bench);
+    await this.switchActive(p, bench, 'retreat');
     // Sumidero (Dugtrio Oscuro)
     const o = this.opp(p);
     if (this.findPower(o, 'Sinkhole').length) { const r = await this.flip(p, 1, 'Sumidero'); if (!r[0]) { s.dmg += 20; this.log(`Sumidero hace 20 de daño a ${this.nm(s)}.`); } }
@@ -609,6 +748,7 @@ class Game {
     if (this.noTrainers(p)) return false;
     const t = this.trainerFx(c); if (!t) return false;
     if (d.sub && d.sub.includes('Stadium') && this.stadium && this.def(this.stadium).name === d.name) return false;
+    if (d.sub && d.sub.includes('Pokémon Tool') && !this.slots(p).some(s => !this.tool(s) && !this.eff(s).trainerMon)) return false;
     if (t.can && !t.can(this, p, c)) return false;
     return true;
   }
@@ -619,7 +759,18 @@ class Game {
     const t = this.trainerFx(c);
     if (!opts.fromDiscard) this.removeFrom(p.hand, c);
     this.log(`${p.name} juega ${this.cn(c)}.`);
-    // Gimnasio Caos
+    // Juegos Mentales (Slowking del rival)
+    { const o = this.opp(p); const sk = this.findPower(o, 'Mind Games');
+      if (sk.length && await this.ask(o, { kind: 'yesno', title: `Juegos Mentales: ¿lanzar moneda para anular ${this.cn(c)}?`, purpose: 'mindGames' })) {
+        const r = await this.flip(o, 1, 'Juegos Mentales');
+        if (r[0]) { this.log(`Juegos Mentales: ${this.cn(c)} no hace nada y vuelve encima del mazo.`); p.deck.push(c); this.upd(); return true; }
+      } }
+    // Herramientas Pokémon
+    if (d.sub && d.sub.includes('Pokémon Tool')) {
+      const opts = this.slots(p).filter(s => !this.tool(s) && !this.eff(s).trainerMon);
+      const t = opts.length === 1 ? opts[0] : await this.ask(p, { kind: 'slot', title: `¿A qué Pokémon unes ${this.cn(c)}?`, options: opts, purpose: 'attachTool' });
+      (t || opts[0]).att.push(c); this.log(`${this.cn(c)} se une a ${this.nm(t || opts[0])}.`); this.upd(); return true;
+    }
     if (this.stadiumIs('Chaos Gym') && !(d.sub && d.sub.includes('Stadium')) && !opts.chaos) {
       const r = await this.flip(p, 1, 'Gimnasio Caos');
       if (!r[0]) {
@@ -697,6 +848,7 @@ class Game {
     if (s.st === 'asleep') return { ok: false, why: 'Está Dormido' };
     if (s.st === 'paralyzed') return { ok: false, why: 'Está Paralizado' };
     if (s.fx.cantAttack) return { ok: false, why: 'No puede atacar este turno' };
+    if (this.isBaby(s)) { const oo = this.opp(p); if (oo.active && this.powerActive(oo.active, 'Scare')) return { ok: false, why: 'Asustado: los Bebés no pueden atacar' }; }
     if (s.fx.amnesia && s.fx.amnesia.v === a.name) return { ok: false, why: 'Ataque bloqueado (Amnesia)' };
     if (s.fx.noAtk && s.fx.noAtk.v === a.name) return { ok: false, why: 'No puede usar este ataque este turno' };
     if (s.persist.usedOnce && s.persist.usedOnce.includes(a.name)) return { ok: false, why: 'Sólo una vez por partida' };
@@ -711,6 +863,11 @@ class Game {
     const u = this.attackUsable(p, i); if (!u.ok) return false;
     const s = p.active; const o = this.opp(p); const e = this.eff(s); const a = e.atk[i];
     p.turnOver = true; p.attacked = true;
+    // Regla de Bebé: el atacante lanza una moneda antes de hacer nada
+    if (o.active && this.isBaby(o.active)) {
+      const r = await this.flip(p, 1, `${this.nm(o.active)} es un Bebé: ¿puedes atacar?`);
+      if (!r[0]) { this.log(`Cruz: el turno de ${p.name} termina sin atacar.`); this.upd(); return true; }
+    }
     this.log(`⚔️ ${this.nm(s)} usa ${a.nameEs}.`);
     if (this.io.attackAnim) await this.io.attackAnim(this, p, s, a);
     // confusión
@@ -741,6 +898,8 @@ class Game {
       }
     }
     const x = this.mkCtx(p, s, a, e);
+    this.lastAtk = { u: s.u, a, turn: this.turnNo };
+    if (a.name === 'Night Eyes') x.post(() => { if (x.def) x.def.persist.nightEyes = this.turnNo; });
     // Vermilion
     if (this.stadiumIs('Vermilion City Gym') && this.hasName(s, 'Lt. Surge')) {
       const r = await this.flip(p, 1, 'Gimnasio de Ciudad Carmín');
@@ -752,10 +911,22 @@ class Game {
     if (p.perk === 'surge' && e.types.includes('L')) x.perkBonus = 10;
     if (p.perk === 'blaine' && e.types.includes('R')) x.perkBonus = 10;
     if (p.perk === 'rocket' && e.name.startsWith('Dark ')) x.perkBonus = 10;
+    if ((p.perk === 'falkner' && e.types.includes('C')) || (p.perk === 'chuck' && e.types.includes('F')) || (p.perk === 'pryce' && e.types.includes('W')) || (p.perk === 'karen' && (e.types.includes('D') || e.name.startsWith('Dark '))) || p.perk === 'red') x.perkBonus = 10;
     if (p.flags.koga && this.hasName(s, 'Koga')) x.post(() => { if (x.dealtMain > 0 && x.def && this.slots(o).includes(x.def)) this.setStatus(x.def, 'poisoned'); });
     // potenciadores (Danza Espada, Foco Energía...)
     const bo = s.fx.boost;
     if (bo && bo.v.name === a.name) { x.boosted = bo.v; if (bo.v.mult) { x.dmg *= bo.v.mult; x.base *= bo.v.mult; } if (bo.v.set) { x.dmg = bo.v.set; x.base = bo.v.set; } if (bo.v.self) x.selfMult = bo.v.self; }
+    // Poderes que modifican ataques
+    if (a.name === 'Megahorn' && this.powerActive(s, 'Final Blow') && this.hpLeft(s) <= 20) { x.dmg = x.base = 120; this.log('Golpe Final: Megacuerno hace 120 de daño base.'); }
+    if (a.name === 'Floodlight' && this.powerActive(s, 'Hydroelectric Power')) { const ex = this.extraEnergy(s, a, 'W'); if (ex) { x.dmg += 10 * ex; x.base += 10 * ex; } }
+    if (a.name === 'Hidden Power' && e.name.indexOf('Unown') === 0) {
+      const ang = this.slots(p).find(t => this.powerActive(t, '[Anger]')); if (ang && ang.dmg) { x.dmg += ang.dmg; this.log(`[Ira] añade ${ang.dmg} de daño.`); }
+      const xx = this.slots(p).find(t => this.powerActive(t, '[XXXXX]')); if (xx) { const h = await this.flipUntilTails(p, '[XXXXX]'); x.dmg += 10 * h; }
+      if (this.baseDef(s).pw && this.baseDef(s).pw.name === '[Perform]' && this.powerOn(s) && s.st !== 'asleep' && s.st !== 'paralyzed' && s.persist.lastAttack && s.persist.lastAttack.turn === this.turnNo - 1) x.dmg += s.persist.lastAttack.d;
+    }
+    if (this.powerActive(s, 'Frog Song')) { const n = this.allSlots().filter(t => /^(Poliwag|Poliwhirl|Poliwrath|Politoed)$/.test(this.eff(t).name)).length; if (n > 3) x.bonusAfter = 40; }
+    if (s.fx.lockOn && a.name === 'Electric Bolt') x.lockOn = true;
+    if (s.att.some(c => this.def(c).name === 'Magnifier')) x.res = false;
     // ejecutar efecto
     const F = FX.atk[a.fx];
     try {
@@ -765,6 +936,13 @@ class Game {
       if (x.target && !x.noDmg && (x.dmg > 0) && x.target.fx.evasion && x.target.owner !== s.owner) {
         const r = await this.flip(p, 1, 'Evasión del Defensor');
         if (!r[0]) { this.log('Cruz: el ataque no hace daño al Defensor.'); x.noDmg = true; } else delete x.target.fx.evasion;
+      }
+      // protecciones con moneda del Defensor (Baba, Esquivar, Escudo Reflejo)
+      if (x.target && !x.noDmg && x.dmg > 0 && x.target.owner !== s.owner) {
+        const t = x.target;
+        if (t.fx.slime) { const r = await this.flip(p, 1, 'Baba: ¿el ataque hace daño?'); if (!r[0]) { this.log('Cruz: Baba evita el daño.'); x.noDmg = true; } }
+        if (!x.noDmg && t.fx.dodge) { const r = await this.flip(o, 1, 'Esquivar'); if (r[0]) { this.log('Cara: esquiva el daño.'); x.noDmg = true; } }
+        if (!x.noDmg && t.fx.reflect) { const r = await this.flip(o, 1, 'Escudo Reflejo'); if (r[0]) { this.log('Cara: Escudo Reflejo evita el daño y devuelve 20.'); x.noDmg = true; s.dmg += 20; } }
       }
       if (x.target && !x.noDmg && (x.dmg > 0)) {
         const t = x.target;
@@ -790,12 +968,12 @@ class Game {
       cancelled: false, noDmg: false, posts: [], immune: new Set(), damaged: [], dealtMain: 0,
       isMainTarget(t) { return t === x.target; },
       name: e.nameEs,
-      async flip(n = 1, label) { let r = await g.flip(p, n, label || (e.nameEs + ' — ' + a.nameEs)); if (x.esp && r.some(v => !v)) { if (await g.ask(p, { kind: 'yesno', title: 'ESP de Sabrina: ¿relanzar las monedas?', purpose: 'reflip', res: r })) { r = await g.flip(p, n, 'Relanzamiento'); x.esp = false; } } return r.filter(v => v).length; },
+      async flip(n = 1, label) { let r = await g.flip(p, n, label || (e.nameEs + ' — ' + a.nameEs)); if (x.lockOn) { g.log('Blanco Fijado: las cruces cuentan como caras.'); return n; } if (x.esp && r.some(v => !v)) { if (await g.ask(p, { kind: 'yesno', title: 'ESP de Sabrina: ¿relanzar las monedas?', purpose: 'reflip', res: r })) { r = await g.flip(p, n, 'Relanzamiento'); x.esp = false; } } return r.filter(v => v).length; },
       async flip1(label) { return (await x.flip(1, label)) === 1; },
       async flipUntilTails(label) { return g.flipUntilTails(p, label || a.nameEs); },
       post(fn) { x.posts.push(fn); },
       cancel(msg) { x.cancelled = true; if (msg !== false) g.log(msg || 'El ataque no hace nada.'); },
-      status(t, st) { x.post(() => { if (t && !x.immune.has(t.u) && g.slots(g.ownerOf(t)).includes(t) && !(t.fx.immune)) g.setStatus(t, st, { koga: o === g.ownerOf(t) && p.perk === 'koga' && (st === 'poisoned') }); }); },
+      status(t, st) { x.post(() => { if (t && !x.immune.has(t.u) && g.slots(g.ownerOf(t)).includes(t) && !(t.fx.immune) && !g.effectsBlocked(t, p)) g.setStatus(t, st, { koga: o === g.ownerOf(t) && p.perk === 'koga' && (st === 'poisoned') }); }); },
       self(st) { x.post(() => { if (g.slots(p).includes(s)) g.setStatus(s, st); }); },
       selfDmg(n) { n *= (x.selfMult || 1); x.post(() => { if (g.slots(p).includes(s)) { s.dmg += n; g.log(`${x.name} se hace ${n} de daño a sí mismo.`); } }); },
       dmgTo(t, n, opts = {}) { x.post(() => { if (t && g.allSlots().includes(t)) { const d = g.attackDamage(x, t, n, Object.assign({ wr: false }, opts)); if (d) g.log(`${g.nm(t)} recibe ${d} de daño.`); } }); },
@@ -813,9 +991,11 @@ class Game {
       async discardOppEnergy(t, n = 1, title) {
         if (!t || !t.energy.length) return 0;
         if (t.att.some(c => g.def(c).name === "Brock's Protection")) { g.log('La Protección de Brock impide descartar energía.'); return 0; }
+        if (g.effectsBlocked(t, p)) { g.log('El efecto no afecta a ' + g.nm(t) + '.'); return 0; }
+        if (t.owner !== p.i && g.eff(t).name.indexOf('Unown') === 0 && g.findPower(g.ownerOf(t), '[Keep]').length) { g.log('[Conservar] impide descartar energía.'); return 0; }
         const sel = await g.ask(p, { kind: 'cards', title: title || `Elige ${n} energía para descartar de ${g.nm(t)}`, cards: t.energy.slice(), min: Math.min(n, t.energy.length), max: Math.min(n, t.energy.length), purpose: 'discardOppEnergy', slot: t });
         x.post(() => {}); // orden
-        for (const c of sel) { g.removeFrom(t.energy, c); delete c.buzzap; g.toDiscard(c); }
+        for (const c of sel) { g.removeFrom(t.energy, c); delete c.buzzap; if (g.stadiumIs('Ecogym') && t.owner !== p.i && g.def(c).etype) { delete c.inPlay; g.p[c.owner].hand.push(c); g.log('Ecogimnasio devuelve la Energía a la mano.'); } else g.toDiscard(c); }
         g.log(`Se descarta${sel.length > 1 ? 'n' : ''} ${sel.map(c => g.cn(c)).join(', ')} de ${g.nm(t)}.`);
         return sel.length;
       },
@@ -830,7 +1010,7 @@ class Game {
         return g.ask(p, { kind: 'slot', title: title || 'Elige uno de tus Pokémon', options: opts, purpose, optional });
       },
       mark(t, k, v = true, turns = 1) { if (t) { t.fx[k] = { v, until: g.turnNo + turns }; g.noteFx(t, k, v); } },
-      markPost(t, k, v = true, turns = 1) { x.post(() => { if (t && !x.immune.has(t.u) && g.allSlots().includes(t)) { t.fx[k] = { v, until: g.turnNo + turns }; g.noteFx(t, k, v); } }); },
+      markPost(t, k, v = true, turns = 1) { x.post(() => { if (t && !x.immune.has(t.u) && g.allSlots().includes(t) && !g.effectsBlocked(t, p)) { t.fx[k] = { v, until: g.turnNo + turns }; g.noteFx(t, k, v); } }); },
       heal(t, n) { const h = g.heal(t, n); if (h) g.log(`${g.nm(t)} se cura ${h}.`); return h; },
       log(m) { g.log(m); },
     };
@@ -855,13 +1035,29 @@ class Game {
         if (ok && pw === 'Energy Drain') { const r = await this.flip(o, 1, 'Drenar Energía'); if (r[0] && s.energy.length) { const [c] = await this.ask(o, { kind: 'cards', title: 'Elige energía del atacante para descartar', cards: s.energy.slice(), min: 1, max: 1, purpose: 'discardOppEnergy', slot: s }); this.removeFrom(s.energy, c); delete c.buzzap; this.toDiscard(c); this.log('Drenar Energía descarta una energía del atacante.'); } }
         if (ok && pw === 'Final Beam' && t.dmg >= this.hp(t)) { const r = await this.flip(o, 1, 'Rayo Final'); if (r[0]) { const w = this.energyCardsOf(t, 'W').length; const fake = this.mkCtx(o, t, { dmg: '0', name: 'Final Beam' }, this.eff(t)); fake.target = s; fake.def = s; const dd = this.attackDamage(fake, s, 20 * w, { wr: true }); this.log(`Rayo Final hace ${dd} de daño.`); } }
         if (t.fx.destiny && t.dmg >= this.hp(t)) { s.dmg = Math.max(s.dmg, this.hp(s)); this.log('Lazo Destino: el atacante también queda Fuera de Combate.'); }
-        if (t.fx.counter && alive !== undefined) { const v = t.fx.counter.v; let amount = 0; if (v === 'equal') amount = d; else if (v === 'double') { const r = await this.flip(o, 1, 'Contraataque'); if (r[0]) amount = d * 2; } else amount = v; if (amount) { const fake = this.mkCtx(o, t, { dmg: '0', name: 'Counter' }, this.eff(t)); fake.target = s; fake.def = s; const dd = this.attackDamage(fake, s, amount, { wr: v === 10 }); this.log(`${this.nm(t)} contraataca por ${dd}.`); } }
-        if (t.fx.lastHit === undefined) t.persist.lastAttack = { by: s.u, d, turn: this.turnNo };
+        if (t.fx.counter && alive !== undefined) { const v = t.fx.counter.v; let amount = 0; if (v === 'equal') amount = d; else if (v === 'equalFlip') { const r = await this.flip(o, 1, 'Contraataque'); if (r[0]) amount = d; } else if (v === 'double') { const r = await this.flip(o, 1, 'Contraataque'); if (r[0]) amount = d * 2; } else amount = v; if (amount) { const fake = this.mkCtx(o, t, { dmg: '0', name: 'Counter' }, this.eff(t)); fake.target = s; fake.def = s; const dd = this.attackDamage(fake, s, amount, { wr: v === 10 }); this.log(`${this.nm(t)} contraataca por ${dd}.`); } }
+        if (t.fx.lastHit === undefined) t.persist.lastAttack = { by: s.u, d, turn: this.turnNo, active: this.isActive(t) };
+        // Garras Contraataque
+        const claws = t.att.find(c => this.def(c).name === 'Counterattack Claws');
+        if (claws && this.isActive(t)) { const r = await this.flip(o, 1, 'Garras Contraataque'); this.discardAtt(t, claws); if (r[0]) { s.dmg += 20; this.log('Garras Contraataque pone 2 contadores en el atacante.'); } }
+        if (pw === 'Fluffy Wool' && this.isActive(t) && this.powerOn(t) && !this.statusBlocksPower(t)) { const r = await this.flip(o, 1, 'Lana Esponjosa'); if (r[0]) this.setStatus(s, 'asleep'); }
+        if (t.fx.secrete) { this.setStatus(s, 'poisoned'); for (const b of p.bench) b.dmg += 10; this.log('Secretar Veneno envenena al atacante y daña su Banca.'); }
         // Huir (Tentacruel de Misty)
         if (ok && pw === 'Flee' && this.isActive(t) && alive && t.dmg < this.hp(t) && o.bench.length) {
           const sw = await this.ask(o, { kind: 'slot', title: 'Huir: ¿cambiar a Tentacruel de Misty con un Pokémon de tu Banca?', options: o.bench.slice(), optional: true, purpose: 'fleeSwitch' });
           if (sw) await this.switchActive(o, sw);
         }
+      }
+      // supervivencia al K.O. (Aguante, Blindaje, Cinta Focus, Viaje en el Tiempo, Repartir Exp.)
+      for (const t of this.slots(o).slice()) {
+        if (t.dmg < this.hp(t) || !x.damaged.some(([dd]) => dd === t)) continue;
+        if (t.fx.endure) { t.dmg = this.hp(t) - 10; this.log(`Aguante: ${this.nm(t)} resiste con 10 PS.`); continue; }
+        if (t.fx.armorUp) { const r = await this.flip(o, 1, 'Blindaje'); if (r[0]) { t.dmg = this.hp(t) - 10; this.log(`Blindaje: ${this.nm(t)} resiste con 10 PS.`); continue; } }
+        const fb = t.att.find(c => this.def(c).name === 'Focus Band');
+        if (fb) { const r = await this.flip(o, 1, 'Cinta Focus'); this.discardAtt(t, fb); if (r[0]) { t.dmg = this.hp(t) - 10; this.log(`Cinta Focus: ${this.nm(t)} resiste con 10 PS.`); continue; } }
+        if (this.baseDef(t).pw && this.baseDef(t).pw.name === 'Time Travel' && this.powerOn(t) && !this.statusBlocksPower(t)) { const r = await this.flip(o, 1, 'Viaje en el Tiempo'); if (r[0]) { const wa = o.active === t; this.shuffleSlotIntoDeck(t); this.log('Viaje en el Tiempo: Celebi vuelve al mazo en vez de quedar Fuera de Combate.'); if (wa) { if (!o.bench.length) this.win(p.i, `${o.name} no tiene Pokémon en juego.`); const n = await this.ask(o, { kind: 'slot', title: 'Elige tu nuevo Pokémon Activo', options: o.bench.slice(), purpose: 'newActive' }); await this.switchActive(o, n || o.bench[0], 'force'); } continue; } }
+        if (o.active === t) { const holder = this.slots(o).find(h => h !== t && h.att.some(c => this.def(c).name === 'EXP.ALL')); const be = t.energy.find(c => this.def(c).basic);
+          if (holder && be) { this.removeFrom(t.energy, be); holder.energy.push(be); this.discardAtt(holder, holder.att.find(c => this.def(c).name === 'EXP.ALL')); this.log(`Repartir Exp.: una Energía pasa a ${this.nm(holder)}.`); } }
       }
       // Fortaleza
       if (x.pendingFortitude) for (const t of x.pendingFortitude) if (this.slots(o).includes(t) && t.dmg >= this.hp(t)) { const r = await this.flip(o, 1, 'Fortaleza'); if (r[0]) { t.dmg = this.hp(t) - 10; this.log('Fortaleza: Machamp de Giovanni resiste con 10 PS.'); } }

@@ -2,7 +2,24 @@
 (function (root) {
 const P = root.PTCG;
 const byName = () => { if (P._byName) return P._byName; const m = {}; for (const d of P.CARDS) (m[d.name] = m[d.name] || []).push(d); return (P._byName = m); };
-const ENERGY_ID = { G: 'base1-99', R: 'base1-98', W: 'base1-102', L: 'base1-100', P: 'base1-101', F: 'base1-97' };
+const ENERGY_ID = { G: 'base1-99', R: 'base1-98', W: 'base1-102', L: 'base1-100', P: 'base1-101', F: 'base1-97', D: 'neo1-104', M: 'neo1-19' };
+const SPECIAL_T = { D: 4, M: 4 }; // Energías especiales: máximo 4 copias
+const maxCopies = d => (d.shining || d.name === 'Miracle Energy') ? 1 : 4;
+const idOf = name => { const l = byName()[name]; return l ? l[0].id : null; };
+// reparte energía respetando el límite de las especiales
+function fillEnergy(deck, need, fallback) {
+  let etypes = Object.keys(need).filter(t => ENERGY_ID[t]);
+  if (!etypes.length) etypes.push(fallback in ENERGY_ID ? fallback : 'F');
+  const left = 60 - deck.length; const tot = etypes.reduce((a, t) => a + (need[t] || 1), 0);
+  const alloc = {}; let placed = 0;
+  etypes.forEach((t, i) => { let n = i === etypes.length - 1 ? left - placed : Math.round(left * (need[t] || 1) / tot); alloc[t] = n; placed += n; });
+  let spill = 0;
+  for (const t of etypes) if (SPECIAL_T[t] && alloc[t] > SPECIAL_T[t]) { spill += alloc[t] - SPECIAL_T[t]; alloc[t] = SPECIAL_T[t]; }
+  const basics = etypes.filter(t => !SPECIAL_T[t]);
+  if (spill) { if (basics.length) basics.forEach((t, i) => { alloc[t] += i === basics.length - 1 ? spill - Math.floor(spill / basics.length) * (basics.length - 1) : Math.floor(spill / basics.length); }); else { const dce = idOf('Double Colorless Energy'); for (let k = 0; k < Math.min(4, spill); k++) deck.push(dce); spill -= Math.min(4, spill); const fb = fallback && !SPECIAL_T[fallback] ? fallback : 'P'; alloc[fb] = (alloc[fb] || 0) + spill; } }
+  for (const t in alloc) for (let k = 0; k < alloc[t]; k++) deck.push(ENERGY_ID[t]);
+  while (deck.length < 60) deck.push(ENERGY_ID[basics[0] || 'P']);
+}
 // líneas evolutivas
 function lines(pool) {
   const ls = [];
@@ -23,22 +40,25 @@ function power(d) { // fuerza aproximada de una carta
 // cfg: {types:['W','L'], pool:[defs] o sets, level:1..5, rng, owner:'Misty' (prefiere), trainers:[ids...], size:60}
 function genDeck(cfg) {
   const rng = cfg.rng || Math.random;
-  const pool = (cfg.pool || P.CARDS).filter(d => !cfg.sets || cfg.sets.includes(d.set));
+  const LEG = /^(Lugia|Ho-oh|Celebi|Entei|Raikou|Suicune|Shining )/;
+  const prefOk = d => cfg.prefer && cfg.prefer.some(n => d.name.indexOf(n) >= 0);
+  const rarOk = d => { if (cfg.era !== 'neo' || d.st !== 'P' || prefOk(d)) return true; const L = cfg.level || 2; if (L < 5 && LEG.test(d.name)) return false; if (L <= 2) return d.rar === 'C' || d.rar === 'U'; if (L === 3) return d.rar !== 'RH' && d.rar !== 'SH'; if (L === 4) return d.rar !== 'SH'; return true; };
+  const pool = (cfg.pool || P.CARDS).filter(d => (!cfg.sets || cfg.sets.includes(d.set)) && rarOk(d));
   const types = cfg.types;
   const lvl = cfg.level || 2;
   const owner = cfg.owner;
-  let ls = lines(pool).filter(l => l.basic.types.some(t => types.includes(t)) || (cfg.colorless && l.basic.types.includes('C')));
+  let ls = lines(pool).filter(l => l.basic.types.some(t => types.includes(t)) || (cfg.colorless && l.basic.types.includes('C')) || (cfg.prefer && [l.basic, ...l.s1, ...l.s2].some(d => cfg.prefer.some(n => d.name.indexOf(n) >= 0))));
   if (owner) {
     const own = ls.filter(l => l.basic.name.indexOf(owner) >= 0);
     if (own.length >= 3 || cfg.ownerOnly) ls = own.concat(cfg.ownerOnly ? [] : ls.filter(l => l.basic.name.indexOf(owner) < 0 && !/'s /.test(l.basic.name)).slice(0, 2));
   } else ls = ls.filter(l => !/^(Brock|Misty|Lt\. Surge|Erika|Koga|Sabrina|Blaine|Giovanni|Rocket)'s /.test(l.basic.name) || cfg.allowOwners);
   // puntuar líneas
-  const score = l => { const top = [l.basic, ...l.s1, ...l.s2].map(power); const mx = Math.max(...top); const depth = l.s2.length ? 2 : l.s1.length ? 1 : 0; const lvlPref = lvl <= 1 ? -depth * 6 : lvl >= 4 ? depth * 4 : depth; return mx + lvlPref + (owner && l.basic.name.indexOf(owner) >= 0 ? 15 : 0) + rng() * 8; };
+  const score = l => { const top = [l.basic, ...l.s1, ...l.s2].map(power); const mx = Math.max(...top); const depth = l.s2.length ? 2 : l.s1.length ? 1 : 0; const lvlPref = lvl <= 1 ? -depth * 6 : lvl >= 4 ? depth * 4 : depth; return mx + lvlPref + (owner && l.basic.name.indexOf(owner) >= 0 ? 15 : 0) + (cfg.prefer && [l.basic, ...l.s1, ...l.s2].some(d => cfg.prefer.some(n => d.name.indexOf(n) >= 0)) ? 25 : 0) + rng() * 8; };
   ls.sort((a, b) => score(b) - score(a));
   { const seen = new Set(); ls = ls.filter(l => { if (seen.has(l.basic.name)) return false; seen.add(l.basic.name); return true; }); }
   const deck = [];
   const nameCount = {};
-  const add = (d, n) => { for (let k = 0; k < n; k++) { if ((nameCount[d.name] || 0) >= 4) return; nameCount[d.name] = (nameCount[d.name] || 0) + 1; deck.push(d.id); } };
+  const add = (d, n) => { for (let k = 0; k < n; k++) { if ((nameCount[d.name] || 0) >= maxCopies(d)) return; nameCount[d.name] = (nameCount[d.name] || 0) + 1; deck.push(d.id); } };
   const nLines = lvl <= 1 ? 4 : lvl <= 3 ? 4 : 3;
   let pokeCount = 0; const target = lvl <= 1 ? 22 : 20;
   for (const l of ls.slice(0, nLines + 2)) {
@@ -48,23 +68,28 @@ function genDeck(cfg) {
     const useS2 = s2 && lvl >= 2;
     const nb = useS2 ? 4 : s1 ? 3 : 3;
     add(l.basic, nb); pokeCount += nb;
+    // Bebé de esa línea (Pichu → Pikachu, etc.)
+    const baby = lvl >= 2 && pool.find(b => b.baby && (b.babyTo || []).includes(l.basic.name));
+    if (baby && rng() < 0.7) { add(baby, lvl >= 4 ? 2 : 1); pokeCount += 1; }
     if (s1 && (lvl >= 1)) { const n = useS2 ? 3 : 3; add(s1, n); pokeCount += n; }
     if (useS2 && s2.from === s1.name) { const n = lvl >= 4 ? 3 : 2; add(s2, n); pokeCount += n; }
   }
   // trainers
   const T = id => deck.push(id);
-  const tr = cfg.trainers || defaultTrainers(lvl, owner, rng);
-  for (const id of tr) { const d = P.DB[id]; if (deck.length < 60 - 16 && (nameCount[d.name] || 0) < 4) { nameCount[d.name] = (nameCount[d.name] || 0) + 1; T(id); } }
+  const tr = cfg.trainers || (cfg.era === 'neo' ? neoTrainers(lvl) : defaultTrainers(lvl, owner, rng));
+  const eLeft = types.some(t => SPECIAL_T[t]) ? 14 : 16;
+  for (const id of tr) { const d = P.DB[id]; if (deck.length < 60 - eLeft && (nameCount[d.name] || 0) < maxCopies(d)) { nameCount[d.name] = (nameCount[d.name] || 0) + 1; T(id); } }
   // energía
   const need = {}; for (const id of deck) { const d = P.DB[id]; if (d.st === 'P') for (const a of d.atk) for (const c of a.cost) if (c !== 'C') need[c] = (need[c] || 0) + 1; }
-  let tot = Object.values(need).reduce((a, b) => a + b, 0) || 1;
-  const left = 60 - deck.length;
-  const etypes = Object.keys(need).filter(t => ENERGY_ID[t]);
-  if (!etypes.length) etypes.push(types[0] in ENERGY_ID ? types[0] : 'F');
-  let placed = 0;
-  etypes.forEach((t, i) => { const n = i === etypes.length - 1 ? left - placed : Math.round(left * (need[t] || 1) / tot); for (let k = 0; k < n; k++) deck.push(ENERGY_ID[t]); placed += n; });
-  while (deck.length < 60) deck.push(ENERGY_ID[etypes[0]]);
+  fillEnergy(deck, need, types.find(t => ENERGY_ID[t] && !SPECIAL_T[t]) || types[0]);
   return deck.slice(0, 60);
+}
+function neoTrainers(lvl) {
+  const t = []; const push = (n, k) => { const id = idOf(n); if (id) for (let i = 0; i < k; i++) t.push(id); };
+  if (lvl <= 1) { push('Bill', 3); push('Potion', 3); push('Switch', 1); push('Energy Ark', 1); }
+  else if (lvl === 2) { push('Bill', 3); push('Professor Elm', 1); push('Potion', 2); push('Switch', 2); push('Berry', 2); push('Energy Ark', 1); push('Pokémon March', 1); }
+  else { push('Professor Elm', 3); push('Bill', 2); push('Pokémon Breeder Fields', 2); push('Gust of Wind', 2); push('Focus Band', 2); push('Energy Removal', 2); push('Super Energy Removal', 1); push('Gold Berry', 1); push('Switch', 1); push('PlusPower', 1); }
+  return t;
 }
 function defaultTrainers(lvl, owner, rng) {
   const t = [];
@@ -85,7 +110,7 @@ function defaultTrainers(lvl, owner, rng) {
 function validate(deck, coll) {
   const errs = []; if (deck.length !== 60) errs.push(`El mazo tiene ${deck.length} cartas (deben ser 60).`);
   const cnt = {}; for (const id of deck) { const d = P.DB[id]; if (d.st === 'E' && d.basic) continue; cnt[d.name] = (cnt[d.name] || 0) + 1; }
-  for (const [n, c] of Object.entries(cnt)) if (c > 4) errs.push(`Más de 4 copias de ${P.DB[deck.find(id => P.DB[id].name === n)].nameEs}.`);
+  for (const [n, c] of Object.entries(cnt)) { const d = P.DB[deck.find(id => P.DB[id].name === n)]; const mx = maxCopies(d); if (c > mx) errs.push(mx === 1 ? `Sólo puedes tener 1 ${d.nameEs} en tu mazo.` : `Más de 4 copias de ${d.nameEs}.`); }
   if (!deck.some(id => P.DB[id].st === 'P' && P.DB[id].stage === 0)) errs.push('Necesitas al menos un Pokémon Básico.');
   return errs;
 }
@@ -93,7 +118,7 @@ function validate(deck, coll) {
 function genDarkDeck(cfg) {
   const rng = cfg.rng || Math.random; const lvl = cfg.level || 2;
   const D = P.CARDS;
-  const darks = D.filter(d => d.st === 'P' && d.name.startsWith('Dark '));
+  const darks = D.filter(d => d.st === 'P' && d.name.startsWith('Dark ') && (!cfg.sets || cfg.sets.includes(d.set)));
   const basicOf = name => D.find(d => d.set === 'base5' && d.name === name && d.st === 'P' && d.stage === 0) || D.find(d => d.name === name && d.st === 'P' && d.stage === 0);
   const pickVer = list => lvl >= 4 ? (list.find(d => d.rar === 'RH') || list[0]) : (list.find(d => d.rar !== 'RH') || list[0]);
   const s1names = [...new Set(darks.filter(d => d.stage === 1).map(d => d.name))];
@@ -104,7 +129,7 @@ function genDarkDeck(cfg) {
   }).filter(l => l.basic);
   const pref = cfg.types || [];
   const STRONG = ['Dark Blastoise', 'Dark Dragonite', 'Dark Alakazam', 'Dark Charizard', 'Dark Golbat', 'Dark Gyarados', 'Dark Weezing', 'Dark Muk', 'Dark Vileplume', 'Dark Machamp', 'Dark Slowbro', 'Dark Hypno', 'Dark Raichu'];
-  const score = l => { const top = l.s2 || l.s1; let v = power(top) + rng() * 8; if (pref.some(t => top.types.includes(t))) v += 12; if (lvl >= 4 && STRONG.includes(top.name)) v += 10; return v; };
+  const score = l => { const top = l.s2 || l.s1; let v = power(top) + rng() * 8; if (pref.some(t => top.types.includes(t))) v += 12; if (cfg.prefer && cfg.prefer.some(n => top.name.indexOf(n) >= 0 || l.s1.name.indexOf(n) >= 0)) v += 30; if (lvl >= 4 && STRONG.includes(top.name)) v += 10; return v; };
   const s2lines = all.filter(l => l.s2).sort((a, b) => score(b) - score(a));
   const s1lines = all.filter(l => !l.s2).sort((a, b) => score(b) - score(a));
   // estructura según nivel
@@ -126,11 +151,8 @@ function genDarkDeck(cfg) {
   for (const id of T) { const d = P.DB[id]; if ((nc[d.name] || 0) < 4) { nc[d.name] = (nc[d.name] || 0) + 1; deck.push(id); } }
   for (const id of (lvl >= 3 ? ['base5-80', 'base5-80', 'base5-81'] : ['base5-80', 'base5-82'])) deck.push(id);
   const need = {}; for (const id of deck) { const d = P.DB[id]; if (d.st === 'P') for (const a of d.atk) for (const c of a.cost) if (c !== 'C') need[c] = (need[c] || 0) + 1; }
-  const types = Object.keys(need).filter(t => ENERGY_ID[t]); if (!types.length) types.push('P');
-  const tot = types.reduce((a, t) => a + need[t], 0); const left = 60 - deck.length; let placed = 0;
-  types.forEach((t, i) => { const n = i === types.length - 1 ? left - placed : Math.round(left * need[t] / tot); for (let k = 0; k < n; k++) deck.push(ENERGY_ID[t]); placed += n; });
-  while (deck.length < 60) deck.push(ENERGY_ID[types[0]]);
+  fillEnergy(deck, need, (cfg.types || []).find(t => !SPECIAL_T[t]) || 'P');
   return deck.slice(0, 60);
 }
-P.Decks = { genDeck, genDarkDeck, lines, power, validate, ENERGY_ID };
+P.Decks = { genDeck, genDarkDeck, lines, power, validate, ENERGY_ID, maxCopies, idOf, fillEnergy };
 })(typeof window !== 'undefined' ? window : globalThis);

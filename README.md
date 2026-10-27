@@ -2,6 +2,8 @@
 
 Pokémon TCG de la era Base jugable en español (Base Set, Jungle, Fossil, Base Set 2, Team Rocket, Gym Heroes y Gym Challenge), con apertura de sobres, constructor de mazos y campaña de 8 gimnasios de Kanto contra la IA.
 
+Al conseguir las 8 medallas de Kanto se abre **Johto**, con las expansiones **Neo Genesis, Neo Discovery, Neo Revelation y Neo Destiny**: 8 gimnasios nuevos, Team Rocket en Johto, Alto Mando, Rival Plata y Rojo en el Monte Plateado. Incluye los tipos Siniestro y Metálico, Pokémon Bebé, Brillantes, Luminosos y Herramientas Pokémon.
+
 ## Publicar en GitHub Pages
 1. Crea un repositorio nuevo en GitHub (por ejemplo `liga-kanto`).
 2. Sube **todo el contenido de esta carpeta** a la raíz del repositorio (index.html, manifest.webmanifest, sw.js, .nojekyll y las carpetas `src`, `assets`, `icons`).
@@ -20,4 +22,4 @@ Se abre a pantalla completa y, tras la primera carga, funciona sin conexión.
 El progreso se guarda en el navegador del teléfono. Usa *Opciones → Exportar partida* para respaldarlo o pasarlo a otro dispositivo, e *Importar partida* para cargarlo.
 
 ## Actualizar
-Si cambias archivos, sube el número de versión en `sw.js` (`liga-kanto-v8` → `v8`) para que los teléfonos descarguen la versión nueva.
+Si cambias archivos, sube el número de versión en `sw.js` (`liga-kanto-v9` → `v10`) para que los teléfonos descarguen la versión nueva.

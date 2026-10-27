@@ -56,6 +56,37 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 /* ---- tarjetas ---- */
 .card { width: var(--cw); height: calc(var(--cw) * 1.375); border-radius: calc(var(--cw) * .05); background-repeat: no-repeat; background-size: 500% 400%; box-shadow: 0 2px 6px rgba(0,0,0,.5); position: relative; flex: none; }
 .card.back { background-image: url(assets/back.webp); background-size: cover; }
+/* carta dibujada (sin escaneo) */
+.card.drawn { container-type: size; background: #222; overflow: hidden; }
+.dc { position: absolute; inset: 3.5cqw; border-radius: 3cqw; display: flex; flex-direction: column; gap: 1.5cqw; padding: 3cqw 3.5cqw; font-family: 'Barlow Condensed', system-ui, sans-serif; color: #1b1b1b; line-height: 1.05;
+  --c1: #c9c4b8; --c2: #8f897c; background: linear-gradient(160deg, var(--c1), var(--c2)); box-shadow: inset 0 0 0 1.2cqw rgba(255,255,255,.35); }
+.dc.t-G { --c1: #a6dd7f; --c2: #4f9a3a; } .dc.t-R { --c1: #ffa47c; --c2: #d2482a; } .dc.t-W { --c1: #9fd4ff; --c2: #2f7fcf; } .dc.t-L { --c1: #fff08a; --c2: #e0b10f; }
+.dc.t-P { --c1: #d8b0f0; --c2: #8650b4; } .dc.t-F { --c1: #e7b88e; --c2: #a1612f; } .dc.t-C { --c1: #f1ede4; --c2: #b8b1a2; } .dc.t-D { --c1: #6f6c80; --c2: #23222c; color: #f2f2f2; } .dc.t-M { --c1: #eef1f4; --c2: #8d97a3; }
+.dc.tr { --c1: #eef2f7; --c2: #b9c4d2; } .dc.dark { box-shadow: inset 0 0 0 1.2cqw rgba(30,10,40,.65); } .dc.light { box-shadow: inset 0 0 0 1.2cqw rgba(255,250,200,.9); }
+.dc.shiny { background: linear-gradient(160deg, #fff6c4, var(--c1) 40%, var(--c2)); box-shadow: inset 0 0 0 1.2cqw #f6d55c; }
+.dc-top { display: flex; align-items: baseline; gap: 2cqw; font-size: 8.5cqw; }
+.dc-st { font-size: 5cqw; font-weight: 700; opacity: .75; }
+.dc-nm { flex: 1; font-size: 9.5cqw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-hp { font-size: 7cqw; font-weight: 700; color: #b0141c; } .dc.t-D .dc-hp { color: #ff8a8a; }
+.dc-art { flex: 0 0 36%; border-radius: 2cqw; background: radial-gradient(circle at 50% 45%, rgba(255,255,255,.8), rgba(255,255,255,.15) 60%), linear-gradient(var(--c2), var(--c1)); display: grid; place-items: center; position: relative; box-shadow: inset 0 0 0 .8cqw rgba(0,0,0,.25); }
+.dc-art.en { flex: 1; }
+.dc-ico { width: 26cqw; height: 26cqw; background-size: contain; filter: drop-shadow(0 1cqw 1.5cqw rgba(0,0,0,.4)); }
+.dc-art.en .dc-ico { width: 52cqw; height: 52cqw; }
+.dc-dex { position: absolute; right: 2cqw; bottom: 1cqw; font-size: 5.5cqw; opacity: .6; }
+.dc-atk { flex: 1; display: flex; flex-direction: column; gap: 1.5cqw; overflow: hidden; }
+.dc-pw { font-size: 6.3cqw; font-weight: 700; color: #a3121b; } .dc.t-D .dc-pw { color: #ffb3b3; }
+.dc-a { display: flex; align-items: center; gap: 1.5cqw; font-size: 7cqw; border-top: .4cqw solid rgba(0,0,0,.18); padding-top: 1.2cqw; }
+.dc-cost { display: flex; gap: .4cqw; } .dc-cost i { width: 6cqw; height: 6cqw; background-size: contain; display: inline-block; }
+.dc-an { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .dc-a b { font-size: 8cqw; }
+.dc-txt { flex: 1; font-size: 5.6cqw; line-height: 1.15; overflow: hidden; background: rgba(255,255,255,.55); border-radius: 2cqw; padding: 2cqw; color: #1b1b1b; }
+.dc-ft { font-size: 4.8cqw; text-align: right; opacity: .7; }
+.symtxt { display: inline-block; font: 700 11px/1 system-ui; background: #2a3a5a; color: #ffd257; border-radius: 4px; padding: 3px 5px; vertical-align: 2px; }
+/* selector de región */
+.regtabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.regtabs button { flex: 1; font-weight: 700; padding: 8px 10px; border-radius: 8px; }
+.regtabs button.on { background: var(--gold); color: #1b1300; }
+.regtabs button.lock { opacity: .55; }
+.regtabs .cnt { font-weight: 500; opacity: .75; }
 .card.big { --cw: 300px; }
 .holo::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.35) 45%, rgba(120,200,255,.25) 52%, transparent 65%); background-size: 250% 250%; mix-blend-mode: screen; animation: shine 3.2s linear infinite; pointer-events: none; }
 @keyframes shine { from { background-position: 120% 0; } to { background-position: -120% 0; } }
@@ -393,6 +424,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 <script src="src/fx_atk.js"></script>
 <script src="src/fx_pw.js"></script>
 <script src="src/fx_tr.js"></script>
+<script src="src/fx_neo.js"></script>
 <script src="src/ai.js"></script>
 <script src="src/decks.js"></script>
 <script src="src/campaign.js"></script>
