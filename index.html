@@ -195,6 +195,8 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .slot .stt { position: absolute; top: 18%; left: -12px; display: flex; flex-direction: column; gap: 2px; z-index: 2; }
 .slot .stt span { font: 700 11px var(--f-cond); padding: 1px 5px; border-radius: 5px; }
 .slot .stt img { width: 26px; height: 26px; }
+.slot .stt .st-tag-burned { background: #c2410c; color: #fff; }
+#map.orange { background: radial-gradient(ellipse at 40% 30%, #4cc3e0, #1f86b5 70%, #176b96); }
 .st-tag-asleep { background: #5a6bd8; } .st-tag-confused { background: #c64fc9; } .st-tag-paralyzed { background: #d8b321; color: #000; }
 .slot .tools { position: absolute; bottom: 20px; left: -6px; display: flex; flex-direction: column; gap: 1px; z-index: 2; }
 .slot .tools span { font: 700 10px var(--f-cond); background: #0f6a5a; padding: 0 4px; border-radius: 4px; }
@@ -425,11 +427,11 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 <script src="src/fx_pw.js"></script>
 <script src="src/fx_tr.js"></script>
 <script src="src/fx_neo.js"></script>
+<script src="src/fx_ecard.js"></script>
 <script src="src/ai.js"></script>
 <script src="src/decks.js"></script>
 <script src="src/campaign.js"></script>
 <script src="src/ui.js"></script>
-
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   // al instalarse una versión nueva, recarga una vez para usarla de inmediato

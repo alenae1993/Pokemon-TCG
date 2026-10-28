@@ -4,6 +4,8 @@ Pokémon TCG de la era Base jugable en español (Base Set, Jungle, Fossil, Base 
 
 Al conseguir las 8 medallas de Kanto se abre **Johto**, con las expansiones **Neo Genesis, Neo Discovery, Neo Revelation y Neo Destiny**: 8 gimnasios nuevos, Team Rocket en Johto, Alto Mando, Rival Plata y Rojo en el Monte Plateado. Incluye los tipos Siniestro y Metálico, Pokémon Bebé, Brillantes, Luminosos y Herramientas Pokémon.
 
+Al conseguir las 8 medallas de Johto se abren las **Islas Naranja**, con **Legendary Collection** y el bloque **e-Card** (**Expedition, Aquapolis y Skyridge**): 4 gimnasios (Cissy, Danny, Rudy y Luana), la Liga Naranja del Supremo Drake, Lawrence III en Isla Shamouti y el Team Rocket. Incluye el estado Quemado, cartas de Partidario (1 por turno), Máquinas Técnicas, Poké-Powers y Poké-Bodies, Pokémon Cristal y las nuevas Energías especiales (Impulso, Cristal, Teletransporte, Rebote, Ciclón y Retro).
+
 ## Publicar en GitHub Pages
 1. Crea un repositorio nuevo en GitHub (por ejemplo `liga-kanto`).
 2. Sube **todo el contenido de esta carpeta** a la raíz del repositorio (index.html, manifest.webmanifest, sw.js, .nojekyll y las carpetas `src`, `assets`, `icons`).

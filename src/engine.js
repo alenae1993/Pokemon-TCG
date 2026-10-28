@@ -3,7 +3,7 @@
 (function (root) {
 'use strict';
 const T = { G: 'Planta', R: 'Fuego', W: 'Agua', L: 'Rayo', P: 'Psíquico', F: 'Lucha', C: 'Incoloro', D: 'Siniestro', M: 'Metálico' };
-const STATUS_ES = { asleep: 'Dormido', confused: 'Confundido', paralyzed: 'Paralizado', poisoned: 'Envenenado' };
+const STATUS_ES = { asleep: 'Dormido', confused: 'Confundido', paralyzed: 'Paralizado', poisoned: 'Envenenado', burned: 'Quemado' };
 let UID = 1;
 const DB = {};          // id -> definición
 const FX = { atk: {}, pw: {}, tr: {} }; // efectos registrados
@@ -53,6 +53,7 @@ const FX_LABEL = {
   lockOn: { ico: '🎯', short: 'BLANCO FIJADO', long: 'tratará las cruces de Rayo Eléctrico como caras en su próximo turno' },
   retreatPlus: { ico: '⛓', short: '+1 RETIRADA', long: 'pagará 1 Energía más para retirarse' },
   benchShield: { ico: '🛡', short: 'PROTEGE BANCA', long: 'protegerá a su Banca del daño de ataques' },
+  noPokePower: { ico: '🚫', short: 'SIN POKÉ-POWER', long: 'no puede usar Poké-Powers hasta el final del próximo turno del rival' },
   dropZero: { ico: '🎯', short: 'MIRADA', long: 'quedará Fuera de Combate si sigue Dormido (Canto Mortal)' },
 };
 class GameOver extends Error { constructor(w) { super('over'); this.winner = w; } }
@@ -162,8 +163,19 @@ class Game {
         this.baseDef(s).atk.forEach((a, i) => e.atk.push(Object.assign({ src: this.baseDef(s).id, idx: i, psylink: true }, a)));
     }
     if (this.stadiumIs("Rocket's Hideout") && e.name.indexOf('Dark ') === 0) e.hp += 20;
-    { const pk = this.ownerOf(slot).perk; if (pk === 'clair' || pk === 'lance') e.hp += 20; }
+    { const pk = this.ownerOf(slot).perk; if (pk === 'clair' || pk === 'lance' || pk === 'luana') e.hp += 20; }
     if (slot.fx.submerge) e.types = ['W'];
+    if (slot.fx.crystal) e.types = [slot.fx.crystal.v];
+    for (const c of slot.att) { const cd = this.def(c);
+      if (cd.name === 'Crystal Shard') e.types = ['C'];
+      if (cd.name === 'Weakness Guard') e.weak = null;
+      if (cd.sub && cd.sub.includes('Technical Machine') && cd.atk) cd.atk.forEach((a, i) => e.atk.push(Object.assign({ src: cd.id, idx: i, tm: true }, a)));
+      if (cd.name === 'Memory Berry') slot.cards.slice(0, -1).forEach(cc => { const dd = this.def(cc); if (dd.st === 'P') dd.atk.forEach((a, i) => e.atk.push(Object.assign({ src: dd.id, idx: i, recall: true }, a))); });
+    }
+    // Psimímica (Alakazam): copia ataques de los Pokémon rivales con su coste
+    if (d.pw && d.pw.name === 'Psymimic' && this.isActive(slot) && !this.statusBlocksPower(slot) && !slot.poison && !slot.burn && this.powerOn(slot)) {
+      for (const t of this.slots(this.opp(this.ownerOf(slot)))) if (this.baseDef(t).st === 'P') this.baseDef(t).atk.forEach((a, i) => e.atk.push(Object.assign({ src: this.baseDef(t).id, idx: i, mimic: true }, a)));
+    }
     // Mimetismo (Sudowoodo)
     if (d.pw && d.pw.name === 'Mimic' && this.isActive(slot) && !this.statusBlocksPower(slot) && this.powerOn(slot)) {
       const t = this.opp(this.ownerOf(slot)).active;
@@ -185,7 +197,7 @@ class Game {
   isDarkMon(slot) { const e = this.eff(slot); return e.types.includes('D') || e.name.indexOf('Dark ') === 0; }
   tool(slot) { return slot.att.find(c => { const d = this.def(c); return d.sub && d.sub.includes('Pokémon Tool'); }); }
   discardAtt(slot, c) { this.removeFrom(slot.att, c); this.toDiscard(c); }
-  effectsBlocked(t, byPlayer) { if (!t || t.owner === byPlayer.i) return false; return !!(t.fx.noEffects || this.powerActive(t, 'Crystal Body')); }
+  effectsBlocked(t, byPlayer) { if (!t || t.owner === byPlayer.i) return false; return !!(t.fx.noEffects || this.powerActive(t, 'Crystal Body') || this.powerActive(t, 'Immunity')); }
   uniquePower(p, name) { const l = this.slots(p).filter(s => this.baseDef(s).pw && this.baseDef(s).pw.name === name); return l.length === 1 && this.powerActive(l[0], name) ? l[0] : null; }
   async evolveFromDeck(p, s, pred, title) {
     const bd = this.baseDef(s);
@@ -220,7 +232,14 @@ class Game {
   powerActive(slot, name) {
     const d = this.baseDef(slot); if (!d.pw || d.pw.name !== name) return false;
     if (!this.powerOn(slot)) return false;
-    const P = FX.pw[name]; if (P && P.ignoreStatus) return true;
+    const P = FX.pw[name];
+    if (P && P.body && this.bodiesOff >= this.turnNo) return false;
+    if (P && P.poke) {
+      if (slot.fx.noPokePower) return false;
+      if (P.anyCond && (slot.poison || slot.burn)) return false;
+      if (!this.isActive(slot) && this.allSlots().some(t => t !== slot && this.isActive(t) && this.powerActive(t, 'Dark Gaze'))) return false;
+    }
+    if (P && (P.ignoreStatus || P.body)) return true;
     return !this.statusBlocksPower(slot);
   }
   findPower(p, name, where) { // where: 'any'|'active'|'bench'
@@ -237,6 +256,10 @@ class Game {
     const ditto = this.eff(slot).ditto;
     const wind = this.miraculousWind();
     const grow = this.baseDef(slot).st === 'P' && this.eff(slot).types.includes('G') && this.findPower(this.ownerOf(slot), 'Wild Growth').length > 0;
+    const owner = this.ownerOf(slot);
+    const darkAura = this.powerActive(slot, 'Dark Aura'), rareMetal = this.powerActive(slot, 'Rare Metal'), prism = this.powerActive(slot, 'Prismatic Body');
+    const burnAll = owner.flags.burnEnergy === this.turnNo, ion = owner.flags.ionT === this.turnNo && this.isActive(slot);
+    const hasBasic = slot.energy.some(c => this.def(c).basic);
     for (const c of slot.energy) {
       const d = this.def(c);
       let prov;
@@ -244,11 +267,19 @@ class Game {
       else if (d.name === 'Double Colorless Energy') prov = ['C', 'C'];
       else if (d.name === 'Rainbow Energy') prov = ['A'];
       else if (d.name === 'Miracle Energy') prov = ['A', 'A'];
+      else if (d.name === 'Boost Energy') prov = ['C', 'C', 'C'];
+      else if (d.name === 'Bounce Energy') prov = ['C', 'C'];
+      else if (d.name === 'Crystal Energy') prov = [hasBasic && !wind ? 'A' : 'C'];
       else if (c.conv && c.convT === this.turnNo) prov = [c.conv];
       else if (d.etype) prov = [d.etype];
       else prov = ['C'];
       if (!d.basic && d.name !== 'Double Colorless Energy' && wind) prov = ['C'];
       if (d.name === 'Grass Energy' && grow) prov = ['G', 'G'];
+      if (d.basic && burnAll) prov = ['R'];
+      if (ion && d.name === 'Lightning Energy') prov = ['W'];
+      if (d.basic && rareMetal) prov = ['M'];
+      if (d.basic && prism) prov = ['A'];
+      if (darkAura) prov = prov.map(() => 'D');
       if (burn) prov = prov.map(() => 'R');
       if (photo) prov = prov.map(() => 'G');
       if (ditto) prov = prov.map(() => 'A');
@@ -286,6 +317,16 @@ class Game {
     c -= this.findPower(p, 'Retreat Aid', 'bench').length;
     if (this.stadiumIs('Broken Ground Gym') && this.eff(slot).stage === 0) c += 1;
     if (this.opp(p).perk === 'morty') c += 1;
+    // Poké-Bodies de retirada
+    const en = slot.energy.length;
+    if (this.powerActive(slot, 'Extreme Speed')) c -= en;
+    if (this.powerActive(slot, 'Lightweight')) c -= this.energyCardsOf(slot, 'G').length;
+    if (this.powerActive(slot, 'Conductive Body')) c -= p.bench.filter(s => this.eff(s).name === this.eff(slot).name).length;
+    if (this.powerActive(slot, 'Heavyweight') && this.energyCardsOf(slot, 'G').length) c += 2;
+    if (this.powerActive(slot, 'Psychoflow') && this.energyCardsOf(slot, 'P').length) c = 0;
+    if (this.powerActive(slot, 'Slippery Skin') && o.active && o.active.cards.length > 1) c = 0;
+    if (this.isActive(slot) && this.allSlots().some(s => this.powerActive(s, 'Gluey Slime'))) c += 1;
+    if (this.isActive(slot) && p.flags.tailwind === this.turnNo) c = 0;
     if (slot.fx.retreatPlus) c += 1;
     if (this.eff(slot).name.indexOf('Unown') === 0 && p.bench.some(s => this.baseDef(s).pw && this.baseDef(s).pw.name === '[Zoom]' && this.powerOn(s))) c = 0;
     return Math.max(0, c);
@@ -309,7 +350,7 @@ class Game {
   draw(p, n = 1) { let k = 0; while (k < n && p.deck.length) { p.hand.push(p.deck.pop()); k++; } return k; }
   shuffleDeck(p) { shuffle(p.deck, this.rnd); }
   removeFrom(arr, c) { const i = arr.indexOf(c); if (i >= 0) arr.splice(i, 1); return c; }
-  clearOnBench(slot) { slot.fx = {}; slot.st = null; slot.poison = 0; for (const c of slot.att.slice()) { const n = this.def(c).name; if (n === "Koga's Ninja Trick" || n === 'Charity') { this.removeFrom(slot.att, c); if (n === 'Charity') this.p[c.owner].hand.push(c); else this.toDiscard(c); } } }
+  clearOnBench(slot) { slot.fx = {}; slot.st = null; slot.poison = 0; slot.burn = false; for (const c of slot.att.slice()) { const n = this.def(c).name; if (n === "Koga's Ninja Trick" || n === 'Charity') { this.removeFrom(slot.att, c); if (n === 'Charity') this.p[c.owner].hand.push(c); else this.toDiscard(c); } } }
   async switchActive(p, benchSlot, why) {
     if (!benchSlot || !p.bench.includes(benchSlot)) return;
     const old = p.active;
@@ -333,10 +374,14 @@ class Game {
     if (this.eff(slot).trainerMon) return false;
     if (this.powerActive(slot, 'Thick Skinned')) return false;
     if (slot.fx.noStatus) return false;
+    if (this.baseDef(slot).name === 'Buried Fossil') return false;
     return true;
   }
   setStatus(slot, s, by) {
     if (!slot || !this.canBeStatused(slot)) return false;
+    if (s === 'poisoned' && this.powerActive(slot, 'Poison Resistance')) return false;
+    if (s === 'burned') { slot.burn = true; this.log(`${this.nm(slot)} ahora está Quemado.`); if (by && by.attacker && this.powerActive(slot, 'Mirror Coat') && this.allSlots().includes(by.attacker)) { by.attacker.burn = true; this.log('Capa Espejo: el atacante también queda Quemado.'); } return true; }
+    if (s === 'poisoned' && by && by.attacker && this.powerActive(slot, 'Mirror Coat') && this.allSlots().includes(by.attacker) && by.attacker !== slot) { const a = by.attacker; by = null; this.setStatus(a, 'poisoned'); this.log('Capa Espejo: el atacante también queda Envenenado.'); }
     if (s === 'poisoned' || s === 'toxic') { const amt = s === 'toxic' ? 20 : 10; slot.poison = Math.max(slot.poison === 20 ? 20 : 0, amt); if (by && by.koga) slot.poison = 20; }
     else { slot.st = s; if (s === 'paralyzed') slot.parT = this.turnNo; }
     const dn = this.baseDef(slot);
@@ -344,7 +389,7 @@ class Game {
     this.log(`${this.nm(slot)} ahora está ${s === 'toxic' ? 'Envenenado (20)' : STATUS_ES[s]}.`);
     return true;
   }
-  cure(slot) { slot.st = null; slot.poison = 0; }
+  cure(slot) { slot.st = null; slot.poison = 0; slot.burn = false; }
 
   // ---------- daño ----------
   // daño directo de contadores (sin debilidad/resistencia, p.ej. veneno, autodaño)
@@ -367,7 +412,7 @@ class Game {
       const ignoreWeak = this.stadiumIs('Cinnabar City Gym') && ae.types.includes('W') && te.name.indexOf('Blaine') >= 0;
       if (te.weak && ae.types.includes(te.weak) && !ignoreWeak && opts.weak !== false) d *= 2;
       const noRes = opts.res === false || (this.stadiumIs('Pewter City Gym') && ae.name.indexOf('Brock') >= 0);
-      if (te.res && ae.types.includes(te.res) && !noRes) d -= this.stadiumIs('Resistance Gym') ? 10 : 30;
+      if (te.res && ae.types.includes(te.res) && !noRes) d -= (this.stadiumIs('Resistance Gym') || this.anyPower('Enervating Pollen').length) ? 10 : 30;
     }
     d = Math.max(0, d);
     if (opts.raw) { target.dmg += d; return d; }
@@ -378,6 +423,7 @@ class Game {
       if (x.vermilion) d += 10;
       if (!this.miraculousWind()) d += 10 * atkSlot.energy.filter(c => this.def(c).name === 'Darkness Energy').length;
       if (x.bonusAfter) d += x.bonusAfter;
+      const sc = atkSlot.att.find(c => this.def(c).name === 'Strength Charm'); if (sc && d > 0) { d += 10; sc.usedT = this.turnNo; }
     }
     if (d > 0 && target.fx.screech && target.owner !== atkSlot.owner) d += 20;
     // reducciones del defensor
@@ -403,9 +449,10 @@ class Game {
     if (this.powerActive(target, 'Strange Barrier') && ae.stage === 0 && d >= 20) d = 10;
     if (this.powerActive(target, 'Shell Armor')) d = Math.max(0, d - 10);
     if (this.powerActive(target, 'Hard Shell') && d > 0 && d <= 40) d = 10;
+    { const tpw = this.baseDef(target).pw; const TP = tpw && FX.pw[tpw.name]; if (TP && TP.reduce && d > 0 && this.powerActive(target, tpw.name)) d = Math.max(0, TP.reduce(this, target, atkSlot, d)); }
     const iv = this.findPower(tp, 'Relaxing Scent', 'active'); if (iv.length) d = ceil10(d / 2);
     const iv2 = this.findPower(this.ownerOf(atkSlot), 'Relaxing Scent', 'active'); if (iv2.length && iv2[0] !== iv[0]) d = ceil10(d / 2);
-    if ((tp.perk === 'brock' || tp.perk === 'jasmine') && d > 0) d = Math.max(0, d - 10);
+    if ((tp.perk === 'brock' || tp.perk === 'jasmine' || tp.perk === 'danny') && d > 0) d = Math.max(0, d - 10);
     if (x.charity && target === x.def) d = Math.max(0, d - x.charity);
     // Bench Guard (Rhydon de Brock)
     if (!this.isActive(target) && d > 0) {
@@ -454,7 +501,7 @@ class Game {
         const bs = await this.ask(p, { kind: 'cards', title: 'Elige Pokémon Básicos para tu Banca (opcional)', cards: rest, min: 0, max: Math.min(5, rest.length), purpose: 'setupBench' });
         for (const c of bs) { this.removeFrom(p.hand, c); const s = this.mkSlot(p, c); s.played = 0; p.bench.push(s); }
       }
-      const np = ['giovanni', 'rocket', 'lance', 'red'].includes(p.perk) ? 5 : 6;
+      const np = ['giovanni', 'rocket', 'lance', 'red', 'drake', 'lawrence'].includes(p.perk) ? 5 : 6;
       for (let k = 0; k < np; k++) p.prizes.push(p.deck.pop());
     }
     // ventaja Blaine: energía de fuego gratis
@@ -481,7 +528,7 @@ class Game {
   async turn() {
     const p = this.p[this.cur]; const o = this.opp(p);
     this.turnNo++;
-    p.energyPlayed = false; p.retreated = false; p.used = {}; p.forceEnd = false; p.mistyExtra = false; p.attacked = false; p.flags.misty = false; p.flags.koga = false; p.flags.recall = false; p.flags.blaine = false; p.flags.giovanni = null; p.extraEnergy = 0;
+    p.energyPlayed = false; p.retreated = false; p.used = {}; p.supporterPlayed = false; p.harvestTarget = null; p.harvestUsed = false; p.forceEnd = false; p.mistyExtra = false; p.attacked = false; p.flags.misty = false; p.flags.koga = false; p.flags.recall = false; p.flags.blaine = false; p.flags.giovanni = null; p.extraEnergy = 0;
     this.log(`— Turno ${this.turnNo}: ${p.name} —`);
     this.berries();
     if (!p.deck.length) this.win(o.i, `${p.name} no puede robar carta.`);
@@ -511,7 +558,19 @@ class Game {
       for (const c of s.energy.slice()) if (this.def(c).name === 'Miracle Energy') { this.removeFrom(s.energy, c); this.toDiscard(c); this.log('Se descarta la Energía Milagro.'); }
       for (const c of s.att.slice()) if (this.def(c).name === 'Magnifier') this.discardAtt(s, c);
       if (s.fx.submerge) delete s.fx.submerge;
+      for (const c of s.att.slice()) { const n = this.def(c).name, sub = this.def(c).sub || [];
+        if (sub.includes('Technical Machine')) this.discardAtt(s, c);
+        else if (n === 'Strength Charm' && c.usedT === this.turnNo) this.discardAtt(s, c);
+        else if ((n === 'Crystal Shard' || n === 'Memory Berry') && s.attackedT === this.turnNo) this.discardAtt(s, c); }
+      for (const c of s.energy.slice()) if (this.def(c).name === 'Boost Energy' && c.boostT === this.turnNo) { this.removeFrom(s.energy, c); this.toDiscard(c); this.log('Se descarta la Energía Impulso.'); }
+      if (s.fx.crystal && s.fx.crystal.until <= this.turnNo) delete s.fx.crystal;
     }
+    // Guardia contra Debilidad: dura hasta el final del siguiente turno del rival
+    for (const pl of this.p) for (const s of this.slots(pl)) for (const c of s.att.slice()) if (this.def(c).name === 'Weakness Guard' && c.until <= this.turnNo) this.discardAtt(s, c);
+    // Baya Curativa
+    for (const s of this.allSlots()) { const t = s.att.find(c => this.def(c).name === 'Healing Berry'); if (t && this.hpLeft(s) <= 20 && s.dmg > 0) { this.heal(s, 30); this.discardAtt(s, t); this.log(`La Baya Curativa cura 30 a ${this.nm(s)}.`); } }
+    // Pieza Estrella: evoluciona a un Pokémon en Banca con 2+ contadores
+    for (const pl of this.p) for (const s of pl.bench.slice()) { const t = s.att.find(c => this.def(c).name === 'Star Piece'); if (t && s.dmg >= 20 && pl.deck.some(c => this.def(c).from === this.baseDef(s).name)) { this.discardAtt(s, t); this.log(`La Pieza Estrella hace evolucionar a ${this.nm(s)}.`); await this.evolveFromDeck(pl, s); } }
     // Energía Siniestra: 1 contador a los Pokémon que no son Siniestros
     if (!this.miraculousWind()) for (const s of this.allSlots()) { const n = s.energy.filter(c => this.def(c).name === 'Darkness Energy').length; if (n && !this.isDarkMon(s)) { s.dmg += 10 * n; this.log(`La Energía Siniestra daña a ${this.nm(s)} (${10 * n}).`); } }
     // Contadores de Chamuscar
@@ -532,6 +591,10 @@ class Game {
     for (const pl of [p, o]) {
       const s = pl.active; if (!s) continue;
       if (s.poison) { s.dmg += s.poison; this.log(`${this.nm(s)} recibe ${s.poison} de daño por veneno.`); }
+    }
+    for (const pl of [p, o]) {
+      const s = pl.active; if (!s || !s.burn) continue;
+      const r = await this.flip(pl, 1, `${this.nm(s)} está Quemado`); if (!r[0]) { s.dmg += 20; this.log(`Cruz: ${this.nm(s)} recibe 20 de daño por quemadura.`); }
     }
     for (const pl of [p, o]) {
       const s = pl.active; if (!s) continue;
@@ -560,6 +623,11 @@ class Game {
       if (!this.slots(pl).includes(s)) continue;
       this.log(`💥 ${this.nm(s)} de ${pl.name} queda Fuera de Combate.`);
       const rebirth = this.baseDef(s).pw && this.baseDef(s).pw.name === 'Rebirth' && this.powerOn(s) && !this.statusBlocksPower(s);
+      // Fragmento de Tiempo: si cae por un ataque rival, recupera hasta 2 Energías básicas
+      if (attackCtx && pl.i !== this.cur && s.att.some(c => this.def(c).name === 'Time Shard')) {
+        const be = s.energy.filter(c => this.def(c).basic).slice(0, 2);
+        if (be.length && await this.ask(pl, { kind: 'yesno', title: `Fragmento de Tiempo: ¿devolver ${be.length} Energía(s) básica(s) a tu mano?`, purpose: 'yes' })) { for (const c of be) { this.removeFrom(s.energy, c); delete c.inPlay; pl.hand.push(c); } this.log(`Fragmento de Tiempo devuelve ${be.length} Energía(s) a la mano.`); }
+      }
       this.discardSlot(s);
       if (rebirth && await this.ask(pl, { kind: 'yesno', title: '¿Usar Renacer y devolver a Moltres del Team Rocket a tu mano?', purpose: 'yes' })) {
         const c = pl.discard.find(c => this.def(c).name === "Rocket's Moltres"); if (c) { this.removeFrom(pl.discard, c); pl.hand.push(c); }
@@ -590,7 +658,7 @@ class Game {
     return null;
   }
   // --- Pokémon básico a la banca ---
-  canPlayBasic(p, c) { return this.canAct(p) && this.isBasicCard(c) && p.bench.length < this.benchMax(p) && p.hand.includes(c) && (this.def(c).st === 'P' || !this.noTrainers(p)); }
+  canPlayBasic(p, c) { if (this.def(c).st === 'P' && this.p.some(pl => pl.active && this.powerActive(pl.active, 'Primal Aura'))) return false; return this.canAct(p) && this.isBasicCard(c) && p.bench.length < this.benchMax(p) && p.hand.includes(c) && (this.def(c).st === 'P' || !this.noTrainers(p)); }
   async playBasic(p, c) {
     if (!this.canPlayBasic(p, c)) return false;
     this.removeFrom(p.hand, c);
@@ -619,9 +687,12 @@ class Game {
     return this.slots(p).filter(s => {
       const bd = this.baseDef(s);
       if (bd.st !== 'P' && bd.name !== 'Mysterious Fossil') return false;
+      if (bd.name === 'Buried Fossil' && d.from === 'Mysterious Fossil') { /* ok */ }
       if (bd.pw && bd.pw.name === 'Transform' && this.isActive(s)) return false;
-      if (bd.name !== d.from) return false;
+      if (bd.name !== d.from && !(bd.name === 'Buried Fossil' && d.from === 'Mysterious Fossil')) return false;
       if (s.fx.noEvolve && !ignoreTiming) return false;
+      if (!ignoreTiming && !this.isActive(s) && this.p.some(pl => pl.active && this.powerActive(pl.active, 'Primal Aura'))) return false;
+      if (!ignoreTiming && this.isActive(s) && this.opp(p).active && this.powerActive(this.opp(p).active, 'Primal Stare')) return false;
       if (ignoreTiming) return true;
       const gio = (p.flags.giovanni && p.flags.giovanni === s.u) || (p.perk === 'giovanni' && bd.name.indexOf('Giovanni') >= 0 && !this.firstTurn[p.i]) || (p.perk === 'rocket' && d.name.startsWith('Dark ') && !this.firstTurn[p.i]) || (p.perk === 'bugsy' && d.types.includes('G') && !this.firstTurn[p.i]);
       if (gio) return true;
@@ -635,7 +706,7 @@ class Game {
     if (p.hand.includes(c)) this.removeFrom(p.hand, c);
     const from = this.nm(s);
     const wasBaby = this.baseDef(s).baby;
-    s.cards.push(c); s.evolved = this.turnNo; s.st = null; s.poison = 0; s.fx = {};
+    s.cards.push(c); s.evolved = this.turnNo; s.st = null; s.poison = 0; s.burn = false; s.fx = {};
     if (wasBaby) { s.dmg = 0; this.log('Evolución de Bebé: se retiran todos los contadores de daño.'); }
     if (p.flags.giovanni === s.u) {} // continúa aplicando
     this.log(`${p.name} evoluciona a ${from} en ${this.cn(c)}.`);
@@ -648,13 +719,19 @@ class Game {
     if (!this.canAct(p) || !p.hand.includes(c) || !this.isEnergy(c) || !this.slots(p).includes(s)) return false;
     if (s.fx.noEnergy) return false;
     if (this.eff(s).trainerMon) return false;
-    if (this.def(c).name === 'Miracle Energy' && !/^(Shining|Light) /.test(this.eff(s).name)) return false;
+    const dn = this.def(c).name;
+    if (dn === 'Miracle Energy' && !/^(Shining|Light) /.test(this.eff(s).name)) return false;
+    if (dn === 'Boost Energy' && s.cards.length < 2) return false;
+    if (dn === 'Bounce Energy' && !s.energy.some(e => this.def(e).basic)) return false;
+    if ((dn === 'Lightning Energy' && this.powerActive(s, 'Anti-Lightning')) || (dn === 'Water Energy' && this.powerActive(s, 'Water Immunity')) || (dn === 'Fire Energy' && this.powerActive(s, 'Fire Immunity'))) return false;
+    if (p.flags.noAttachActive && p.flags.noAttachActive.until >= this.turnNo && p.active === s) return false;
+    if (p.energyPlayed && p.harvestTarget === s.u && !p.harvestUsed && this.findPower(p, 'Harvest Bounty').length) return true;
     if (!p.energyPlayed) return true;
     // Danza Lluvia
     const d = this.def(c);
     if (d.name === 'Water Energy' && this.eff(s).types.includes('W') && this.findPower(p, 'Rain Dance').length) return true;
     if (p.flags.blaine && d.name === 'Fire Energy' && p.blaineLeft > 0 && this.hasName(s, 'Blaine') && (!p.blaineTarget || p.blaineTarget === s.u)) return true;
-    if (p.perk === 'misty' && d.name === 'Water Energy' && !p.mistyExtra) return true;
+    if ((p.perk === 'misty' || p.perk === 'cissy') && d.name === 'Water Energy' && !p.mistyExtra) return true;
     return false;
   }
   async attach(p, c, s) {
@@ -662,12 +739,14 @@ class Game {
     const d = this.def(c);
     let viaPower = false;
     if (p.energyPlayed) {
-      if (p.flags.blaine && d.name === 'Fire Energy' && p.blaineLeft > 0 && this.hasName(s, 'Blaine')) { p.blaineLeft--; p.blaineTarget = s.u; }
+      if (p.harvestTarget === s.u && !p.harvestUsed && this.findPower(p, 'Harvest Bounty').length && !(d.name === 'Water Energy' && this.eff(s).types.includes('W') && this.findPower(p, 'Rain Dance').length)) { p.harvestUsed = true; viaPower = true; this.log('Cosecha Abundante permite unir otra Energía.'); }
+      else if (p.flags.blaine && d.name === 'Fire Energy' && p.blaineLeft > 0 && this.hasName(s, 'Blaine')) { p.blaineLeft--; p.blaineTarget = s.u; }
       else if (d.name === 'Water Energy' && this.eff(s).types.includes('W') && this.findPower(p, 'Rain Dance').length) { viaPower = true; }
-      else if (p.perk === 'misty') p.mistyExtra = true;
+      else if ((p.perk === 'misty' || p.perk === 'cissy')) p.mistyExtra = true;
     } else {
       if (p.flags.blaine && d.name === 'Fire Energy' && this.hasName(s, 'Blaine')) { p.blaineLeft = 1; p.blaineTarget = s.u; }
       p.energyPlayed = true;
+      if (p.active === s) p.harvestTarget = s.u;
     }
     this.removeFrom(p.hand, c); s.energy.push(c);
     this.log(`${p.name} une ${this.cn(c)} a ${this.nm(s)}${viaPower ? ' (Danza Lluvia)' : ''}.`);
@@ -684,6 +763,15 @@ class Game {
     // Conductividad (Ampharos Oscuro del rival)
     const amp = this.uniquePower(o, 'Conductivity'); if (amp) { s.dmg += 10; this.log(`Conductividad hace 10 de daño a ${this.nm(s)}.`); }
     if (s.fx.triggered) { this.setStatus(s, 'poisoned'); }
+    // Energías especiales de e-Card
+    if (d.name === 'Boost Energy') c.boostT = this.turnNo;
+    if (d.name === 'Warp Energy' && p.active === s && p.bench.length) { const n = await this.ask(p, { kind: 'slot', title: 'Energía Teletransporte: elige tu nuevo Pokémon Activo', options: p.bench.slice(), purpose: 'swapTo' }); await this.switchActive(p, n || p.bench[0], 'force'); }
+    if (d.name === 'Cyclone Energy' && p.active === s && o.bench.length) { const n = await this.ask(o, { kind: 'slot', title: 'Energía Ciclón: elige tu nuevo Pokémon Activo', options: o.bench.slice(), purpose: 'newActive' }); await this.switchActive(o, n || o.bench[0]); }
+    if (d.name === 'Bounce Energy') { const b = s.energy.find(e => e !== c && this.def(e).basic); if (b) { this.removeFrom(s.energy, b); delete b.inPlay; p.hand.push(b); this.log(`${this.cn(b)} vuelve a la mano.`); } }
+    if (d.name === 'Retro Energy' && s.cards.length > 1 && await this.ask(p, { kind: 'yesno', title: 'Energía Retro: ¿curar 20 e involucionar?', purpose: 'retro' })) { this.heal(s, 20); const top = s.cards.pop(); this.toDiscard(top); s.fx = {}; this.log(`${this.cn(top)} se descarta (involuciona).`); }
+    const pb = this.baseDef(s).pw;
+    if (pb && FX.pw[pb.name] && FX.pw[pb.name].onAttach && this.powerActive(s, pb.name)) await FX.pw[pb.name].onAttach(this, p, s, c);
+    if (this.stadiumIs('Pokémon Park') && p.bench.includes(s) && s.dmg > 0 && !p.used.park) { p.used.park = true; this.heal(s, 10); this.log('Parque Pokémon cura 10.'); }
     // Estallido Relámpago (Raikou)
     if (d.name === 'Lightning Energy' && this.powerActive(s, 'Lightning Burst') && o.bench.length && o.active) { const n = await this.ask(o, { kind: 'slot', title: 'Estallido Relámpago: elige tu nuevo Pokémon Activo', options: o.bench.slice(), purpose: 'newActive' }); await this.switchActive(o, n || o.bench[0]); }
     // Evolución por Energía (Eevee)
@@ -698,6 +786,7 @@ class Game {
     const s = p.active;
     if (s.st === 'asleep' || s.st === 'paralyzed') return false;
     if (s.fx.noRetreat || s.fx.noSwitch) return false;
+    if (s.energy.some(c => this.def(c).name === 'Boost Energy')) return false;
     const cost = this.retreatCost(s);
     if (s.att.some(c => this.def(c).name === 'Balloon Berry')) return true;
     if (cost > 50) return false;
@@ -712,6 +801,7 @@ class Game {
     if (s.fx.pursuit) { s.dmg += 10; this.log(`Persecución hace 10 de daño a ${this.nm(s)}.`); }
     if (o0.active && this.powerActive(o0.active, '[Chase]')) { const r = await this.flip(o0, 1, '[Cazar]'); if (r[0]) { s.dmg += 10; this.log(`[Cazar] pone un contador en ${this.nm(s)}.`); } }
     if (s.dmg >= this.hp(s)) { await this.resolveKOs(null); this.upd(); return true; }
+    if (this.stadiumIs('Mirage Stadium')) { const r = await this.flip(p, 1, 'Estadio Espejismo: ¿puede retirarse?'); if (!r[0]) { p.retreated = true; this.log('Cruz: no puede retirarse este turno.'); this.upd(); return true; } }
     if (cost > 0) {
       const chosen = await this.chooseEnergyToPay(p, s, cost, 'Elige energía para pagar la retirada');
       if (!chosen) return false;
@@ -723,6 +813,7 @@ class Game {
       if (!r[0]) { this.log('Cruz: no puede retirarse.'); this.upd(); return true; }
     }
     await this.switchActive(p, bench, 'retreat');
+    if (o0.active && this.powerActive(o0.active, 'Suction Cups') && s.energy.length) { for (const c of s.energy.slice()) { this.removeFrom(s.energy, c); this.toDiscard(c); } this.log('Ventosas descarta todas las Energías del Pokémon que se retiró.'); }
     // Sumidero (Dugtrio Oscuro)
     const o = this.opp(p);
     if (this.findPower(o, 'Sinkhole').length) { const r = await this.flip(p, 1, 'Sumidero'); if (!r[0]) { s.dmg += 20; this.log(`Sumidero hace 20 de daño a ${this.nm(s)}.`); } }
@@ -747,6 +838,7 @@ class Game {
     if (d.name === 'Clefairy Doll' || d.name === 'Mysterious Fossil') return !this.noTrainers(p) && p.bench.length < this.benchMax(p);
     if (this.noTrainers(p)) return false;
     const t = this.trainerFx(c); if (!t) return false;
+    if (d.sub && d.sub.includes('Supporter') && (p.supporterPlayed || (p.flags.noSupporter && p.flags.noSupporter.until >= this.turnNo))) return false;
     if (d.sub && d.sub.includes('Stadium') && this.stadium && this.def(this.stadium).name === d.name) return false;
     if (d.sub && d.sub.includes('Pokémon Tool') && !this.slots(p).some(s => !this.tool(s) && !this.eff(s).trainerMon)) return false;
     if (t.can && !t.can(this, p, c)) return false;
@@ -758,6 +850,7 @@ class Game {
     if (d.name === 'Clefairy Doll' || d.name === 'Mysterious Fossil') return this.playBasic(p, c);
     const t = this.trainerFx(c);
     if (!opts.fromDiscard) this.removeFrom(p.hand, c);
+    if (d.sub && d.sub.includes('Supporter')) p.supporterPlayed = true;
     this.log(`${p.name} juega ${this.cn(c)}.`);
     // Juegos Mentales (Slowking del rival)
     { const o = this.opp(p); const sk = this.findPower(o, 'Mind Games');
@@ -898,7 +991,7 @@ class Game {
       }
     }
     const x = this.mkCtx(p, s, a, e);
-    this.lastAtk = { u: s.u, a, turn: this.turnNo };
+    this.lastAtk = { u: s.u, a, turn: this.turnNo }; s.attackedT = this.turnNo;
     if (a.name === 'Night Eyes') x.post(() => { if (x.def) x.def.persist.nightEyes = this.turnNo; });
     // Vermilion
     if (this.stadiumIs('Vermilion City Gym') && this.hasName(s, 'Lt. Surge')) {
@@ -911,7 +1004,7 @@ class Game {
     if (p.perk === 'surge' && e.types.includes('L')) x.perkBonus = 10;
     if (p.perk === 'blaine' && e.types.includes('R')) x.perkBonus = 10;
     if (p.perk === 'rocket' && e.name.startsWith('Dark ')) x.perkBonus = 10;
-    if ((p.perk === 'falkner' && e.types.includes('C')) || (p.perk === 'chuck' && e.types.includes('F')) || (p.perk === 'pryce' && e.types.includes('W')) || (p.perk === 'karen' && (e.types.includes('D') || e.name.startsWith('Dark '))) || p.perk === 'red') x.perkBonus = 10;
+    if ((p.perk === 'falkner' && e.types.includes('C')) || (p.perk === 'chuck' && e.types.includes('F')) || (p.perk === 'pryce' && e.types.includes('W')) || (p.perk === 'karen' && (e.types.includes('D') || e.name.startsWith('Dark '))) || p.perk === 'red' || p.perk === 'drake' || p.perk === 'lawrence' || p.perk === 'luana' || (p.perk === 'rudy' && (e.types.includes('L') || e.types.includes('P')))) x.perkBonus = 10;
     if (p.flags.koga && this.hasName(s, 'Koga')) x.post(() => { if (x.dealtMain > 0 && x.def && this.slots(o).includes(x.def)) this.setStatus(x.def, 'poisoned'); });
     // potenciadores (Danza Espada, Foco Energía...)
     const bo = s.fx.boost;
@@ -940,6 +1033,7 @@ class Game {
       // protecciones con moneda del Defensor (Baba, Esquivar, Escudo Reflejo)
       if (x.target && !x.noDmg && x.dmg > 0 && x.target.owner !== s.owner) {
         const t = x.target;
+        if (t.dmg > 0 && this.powerActive(t, 'Fluff')) { const r = await this.flip(o, 1, 'Pelusa'); if (r[0]) { this.log('Pelusa evita todos los efectos del ataque.'); x.noDmg = true; x.immune.add(t.u); } }
         if (t.fx.slime) { const r = await this.flip(p, 1, 'Baba: ¿el ataque hace daño?'); if (!r[0]) { this.log('Cruz: Baba evita el daño.'); x.noDmg = true; } }
         if (!x.noDmg && t.fx.dodge) { const r = await this.flip(o, 1, 'Esquivar'); if (r[0]) { this.log('Cara: esquiva el daño.'); x.noDmg = true; } }
         if (!x.noDmg && t.fx.reflect) { const r = await this.flip(o, 1, 'Escudo Reflejo'); if (r[0]) { this.log('Cara: Escudo Reflejo evita el daño y devuelve 20.'); x.noDmg = true; s.dmg += 20; } }
@@ -973,7 +1067,7 @@ class Game {
       async flipUntilTails(label) { return g.flipUntilTails(p, label || a.nameEs); },
       post(fn) { x.posts.push(fn); },
       cancel(msg) { x.cancelled = true; if (msg !== false) g.log(msg || 'El ataque no hace nada.'); },
-      status(t, st) { x.post(() => { if (t && !x.immune.has(t.u) && g.slots(g.ownerOf(t)).includes(t) && !(t.fx.immune) && !g.effectsBlocked(t, p)) g.setStatus(t, st, { koga: o === g.ownerOf(t) && p.perk === 'koga' && (st === 'poisoned') }); }); },
+      status(t, st) { x.post(() => { if (t && !x.immune.has(t.u) && g.slots(g.ownerOf(t)).includes(t) && !(t.fx.immune) && !g.effectsBlocked(t, p)) g.setStatus(t, st, { koga: o === g.ownerOf(t) && p.perk === 'koga' && (st === 'poisoned'), attacker: s }); }); },
       self(st) { x.post(() => { if (g.slots(p).includes(s)) g.setStatus(s, st); }); },
       selfDmg(n) { n *= (x.selfMult || 1); x.post(() => { if (g.slots(p).includes(s)) { s.dmg += n; g.log(`${x.name} se hace ${n} de daño a sí mismo.`); } }); },
       dmgTo(t, n, opts = {}) { x.post(() => { if (t && g.allSlots().includes(t)) { const d = g.attackDamage(x, t, n, Object.assign({ wr: false }, opts)); if (d) g.log(`${g.nm(t)} recibe ${d} de daño.`); } }); },

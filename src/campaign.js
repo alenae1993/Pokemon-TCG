@@ -14,9 +14,15 @@ const SETS = [
   { id: 'neo2', name: 'Neo Discovery', code: 'N2', unlock: 2, price: 170, art: 2, color: '#7a5' , region: 'johto' },
   { id: 'neo3', name: 'Neo Revelation', code: 'N3', unlock: 4, price: 180, art: 2, color: '#36c', region: 'johto' },
   { id: 'neo4', name: 'Neo Destiny', code: 'N4', unlock: 6, price: 190, art: 2, color: '#a3c', region: 'johto' },
+  // Islas Naranja (se desbloquean con medallas de las Islas Naranja)
+  { id: 'base6', name: 'Legendary Collection', code: 'LC', unlock: 0, price: 200, art: 2, color: '#c33', region: 'orange' },
+  { id: 'ecard1', name: 'Expedition', code: 'EX', unlock: 1, price: 210, art: 2, color: '#e8a020', region: 'orange' },
+  { id: 'ecard2', name: 'Aquapolis', code: 'AQ', unlock: 2, price: 220, art: 2, color: '#2a6fd0', region: 'orange' },
+  { id: 'ecard3', name: 'Skyridge', code: 'SK', unlock: 3, price: 230, art: 2, color: '#2a9a5a', region: 'orange' },
 ];
 const KANTO_SETS = ['base1', 'base2', 'base3', 'base4', 'base5', 'gym1', 'gym2'];
 const NEO_SETS = ['neo1', 'neo2', 'neo3', 'neo4'];
+const EC_SETS = ['base6', 'ecard1', 'ecard2', 'ecard3'];
 // ranuras de sobre (desde el mod de TTS "Real Boosters V2")
 const R = (a, b) => { const o = []; for (let i = +a; i <= +b; i++) o.push(i); return o; };
 const PACKS = {
@@ -32,6 +38,11 @@ const PACKS = {
   neo2: { slots: [{ cards: [...R(53, 71), 75], n: 7 }, { cards: [...R(37, 52), ...R(72, 74)], n: 3 }], rare: { holo: R(1, 17), rare: R(18, 36), holoOdds: 1 / 3 } },
   neo3: { slots: [{ cards: [...R(41, 59), 64], n: 7 }, { cards: [...R(28, 40), ...R(60, 63)], n: 3 }], rare: { holo: R(1, 14), rare: R(15, 27), holoOdds: 1 / 3, shiny: [65, 66], shinyOdds: 1 / 18 } },
   neo4: { slots: [{ cards: [...R(61, 91), 104, 105], n: 7 }, { cards: [...R(31, 60), ...R(97, 103)], n: 3 }], rare: { holo: R(1, 16), rare: [...R(17, 30), ...R(92, 96)], holoOdds: 1 / 3, shiny: R(106, 113), shinyOdds: 1 / 12 } },
+  // Legendary Collection y e-Card (composición del mod "Real Boosters V2"; la carta "reverse" es cualquiera del set)
+  base6: { slots: [{ cards: R(1, 110), n: 1 }, { cards: [...R(36, 101), ...R(105, 110)], n: 9 }], rare: { holo: R(1, 19), rare: [...R(20, 35), ...R(102, 104)], holoOdds: 1 / 3 } },
+  ecard1: { slots: [{ cards: [...R(71, 92), ...R(137, 152)], n: 2 }, { cards: [...R(33, 70), 158, 159], n: 1 }, { cards: R(33, 159), n: 1 }, { cards: [...R(93, 136), ...R(153, 157)], n: 4 }], rare: { holo: R(1, 32), rare: [...R(93, 136), ...R(153, 157)], holoOdds: 1 / 3 } },
+  ecard2: { slots: [{ cards: [...R(45, 66), ...R(119, 141), ...R(145, 147)], n: 2 }, { cards: [...R(1, 44), 118, ...R(142, 144)], n: 1 }, { cards: R(1, 147), n: 1 }, { cards: [...R(67, 117), ...R(121, 125)], n: 4 }], rare: { holo: R(1, 32).map(i => 'H' + i), rare: [...R(67, 117), ...R(121, 125)], holoOdds: 1 / 3, shiny: R(148, 150), shinyOdds: 1 / 36 } },
+  ecard3: { slots: [{ cards: [...R(45, 66), ...R(119, 141), ...R(145, 147)], n: 2 }, { cards: [...R(1, 44), 118, ...R(142, 144)], n: 1 }, { cards: R(1, 147), n: 1 }, { cards: [...R(67, 117), ...R(121, 125)], n: 4 }], rare: { holo: R(1, 32).map(i => 'H' + i), rare: [...R(67, 117), ...R(121, 125)], holoOdds: 1 / 3, shiny: R(148, 150), shinyOdds: 1 / 36 } },
 };
 function openPack(set, rng) {
   const def = PACKS[set]; const out = [];
@@ -144,17 +155,19 @@ const STARTERS = [
   { id: 'blackout', name: 'Apagón', desc: 'Agua y Lucha: resistencia y golpes fuertes.', types: ['W', 'F'], cover: 'base1-63' },
 ];
 function leaderDeck(gym, rng) {
+  if (gym.region === 'orange') return P.Decks.genDeck({ types: gym.deckTypes || [gym.type], sets: EC_SETS, level: gym.level, rng, era: 'ecard', colorless: gym.type === 'C' || !!gym.colorless, prefer: gym.prefer, trainers: ecTrainers(gym.level) });
   if (gym.region === 'johto') return P.Decks.genDeck({ types: gym.deckTypes || [gym.type], sets: NEO_SETS, level: gym.level, rng, era: 'neo', colorless: gym.type === 'C' || !!gym.colorless, prefer: gym.prefer, trainers: johtoTrainers(gym.level, gym.extra) });
   return P.Decks.genDeck({ types: ['G', 'R', 'W', 'L', 'P', 'F', 'C'], sets: ['gym1', 'gym2'], level: gym.level, rng, owner: gym.owner, ownerOnly: true, allowOwners: true, colorless: true, trainers: gym.leaderTrainers });
 }
 function trainerDeck(t, rng, owner) {
+  if (t.region === 'orange') return orangeDeck(t, rng);
   if (t.region === 'johto') return P.Decks.genDeck({ types: t.types, sets: t.sets || NEO_SETS, level: t.level, rng, era: 'neo', colorless: t.types.includes('C'), prefer: t.prefer, trainers: t.level >= 3 ? johtoTrainers(t.level) : undefined });
   return P.Decks.genDeck({ types: t.types, sets: t.sets || KANTO_SETS, level: t.level, rng, owner: t.owner || owner, allowOwners: !!(t.owner || owner), colorless: true });
 }
 function starterDeck(st, rng) {
   return P.Decks.genDeck({ types: st.types, sets: ['base1'], level: 1, rng, colorless: false });
 }
-function rocketDeck(r, rng) { return P.Decks.genDarkDeck({ types: r.types, level: r.region === 'johto' ? Math.min(5, r.level + 1) : r.level, rng, sets: r.region === 'johto' ? ['base5', 'neo4'] : ['base5', 'gym1', 'gym2'], lean: r.region === 'johto' ? true : undefined, prefer: r.prefer }); }
+function rocketDeck(r, rng) { return P.Decks.genDarkDeck({ types: r.types, level: r.region !== 'kanto' ? Math.min(5, r.level + 1) : r.level, rng, sets: r.region === 'johto' ? ['base5', 'neo4'] : r.region === 'orange' ? ['base5', 'base6', 'neo4'] : ['base5', 'gym1', 'gym2'], lean: r.region !== 'kanto' ? true : undefined, prefer: r.prefer }); }
 function rivalDeck(rng) {
   const types = ['W', 'L', 'P', 'F', 'R', 'G'].sort(() => rng() - 0.5).slice(0, 2);
   return P.Decks.genDeck({ types, level: 5, rng, colorless: true, sets: KANTO_SETS });
@@ -252,9 +265,63 @@ function silverDeck(t, rng) { return P.Decks.genDeck({ types: t.types, sets: NEO
 for (const r of ROUTES) r.region = 'kanto';
 for (const r of ROCKET) r.region = 'kanto';
 for (const g of GYMS) g.region = 'kanto';
+// ===================== ISLAS NARANJA (Legendary Collection + e-Card) =====================
+const O = 'orange';
+const pidE = n => { const l = P.CARDS.filter(d => d.name === n && EC_SETS.includes(d.set)); return (l.find(d => d.rar === 'RH') || l[0] || {}).id || pid(n); };
+const ecTrainers = lvl => { const t = []; const push = (n, k) => { const id = P.Decks.idOf(n); if (id) for (let i = 0; i < k; i++) t.push(id); };
+  if (lvl <= 3) { push("Bill's Maintenance", 2); push("Professor Elm's Training Method", 2); push('Dual Ball', 2); push('Potion', 2); push('Switch', 1); push('Strength Charm', 1); push('Energy Restore', 1); }
+  else { push("Professor Oak's Research", 2); push("Bill's Maintenance", 2); push("Professor Elm's Training Method", 2); push('Pokémon Fan Club', 1); push('Pokémon Reversal', 2); push('Energy Removal 2', 2); push('Strength Charm', 2); push('Hyper Potion', 1); push('Switch', 1); if (lvl >= 5) push('Copycat', 1); }
+  return t; };
+Object.assign(PERKS, {
+  cissy: { name: 'Pistola Agua', es: 'Puede unir una Energía Agua extra cada turno.' },
+  danny: { name: 'Prueba de la Isla', es: 'Todo el daño que reciben sus Pokémon por ataques se reduce en 10.' },
+  rudy: { name: 'Danza Triple', es: 'Sus Pokémon Rayo y Psíquicos hacen 10 de daño más (antes de Debilidad y Resistencia).' },
+  luana: { name: 'Combate Doble', es: 'Sus Pokémon tienen 20 PS más y todos sus ataques hacen 10 de daño más.' },
+  drake: { name: 'Supremo Naranja', es: 'Todos sus ataques hacen 10 de daño más y juega con sólo 5 cartas de Premio.' },
+  lawrence: { name: 'Coleccionista Legendario', es: 'Todos sus ataques hacen 10 de daño más y juega con sólo 5 cartas de Premio.' },
+});
+const OGYMS = [
+  { id: 'mikan', region: O, city: 'Isla Mikan', leader: 'Cissy', portrait: pidE('Seadra'), type: 'W', badge: 'coral', badgeEs: 'Medalla Ojo de Coral', perk: 'cissy', level: 2, x: 26, y: 26, prefer: ['Seadra', 'Horsea', 'Wartortle', 'Squirtle', 'Staryu', 'Starmie', 'Goldeen', 'Seaking'],
+    trainers: [{ name: 'Nadadora Marina', portrait: pidE('Staryu'), level: 2, types: ['W'], region: O }, { name: 'Pescador Tito', portrait: pidE('Goldeen'), level: 3, types: ['W', 'C'], region: O }],
+    quote: '¡Bienvenido a Isla Mikan! Mi desafío pondrá a prueba tu puntería... y tu Pistola Agua.' },
+  { id: 'navel', region: O, city: 'Isla Navel', leader: 'Danny', portrait: pidE('Nidoking'), type: 'F', badge: 'searuby', badgeEs: 'Medalla Rubí Marino', perk: 'danny', level: 4, x: 44, y: 50, deckTypes: ['F', 'G', 'R'], prefer: ['Nidoking', 'Nidoqueen', 'Golem', 'Graveler', 'Geodude', 'Scyther', 'Scizor'],
+    trainers: [{ name: 'Montañero Bruno', portrait: pidE('Geodude'), level: 3, types: ['F'], region: O }, { name: 'Ninfa Lila', portrait: pidE('Bellsprout'), level: 4, types: ['G', 'F'], region: O }],
+    quote: 'Para ganar mi medalla tendrás que escalar la montaña, cruzar el hielo... ¡y vencerme!' },
+  { id: 'trovita', region: O, city: 'Isla Trovita', leader: 'Rudy', portrait: pidE('Electabuzz'), type: 'L', badge: 'spikeshell', badgeEs: 'Medalla Caracola de Púas', perk: 'rudy', level: 4, x: 66, y: 40, deckTypes: ['L', 'P', 'G'], prefer: ['Electabuzz', 'Starmie', 'Exeggutor', 'Raichu', 'Electrode', 'Ampharos', 'Lanturn'],
+    trainers: [{ name: 'Bailarina Mahri', portrait: pidE('Jynx'), level: 3, types: ['P', 'W'], region: O }, { name: 'Marinero Eddy', portrait: pidE('Chinchou'), level: 4, types: ['L', 'W'], region: O }],
+    quote: '¡Mi desafío es triple! Primero un blanco móvil, luego mis Pokémon... ¡y luego mi baile!' },
+  { id: 'kumquat', region: O, city: 'Isla Kumquat', leader: 'Luana', portrait: pidE('Alakazam'), type: 'P', badge: 'jadestar', badgeEs: 'Medalla Estrella de Jade', perk: 'luana', level: 5, x: 80, y: 68, deckTypes: ['P', 'F', 'R'], prefer: ['Alakazam', 'Kadabra', 'Abra', 'Marowak', 'Cubone', 'Ninetales', 'Vulpix', 'Espeon'],
+    trainers: [{ name: 'Médium Iris', portrait: pidE('Abra'), level: 4, types: ['P'], region: O }, { name: 'Karateka Ken', portrait: pidE('Cubone'), level: 5, types: ['F', 'R'], region: O }],
+    quote: 'En Kumquat combatimos en parejas. Mis Pokémon se compenetran a la perfección.' },
+];
+const OROUTES = [
+  { id: 'o_val', region: O, place: 'Laboratorio Ivy', name: 'Joven Tracey', portrait: pidE('Venonat'), level: 2, types: ['G', 'C'], req: 0, x: 4, y: 22 },
+  { id: 'o_tang', region: O, place: 'Isla Tangelo', name: 'Pescadora Lucía', portrait: pidE('Magikarp'), level: 2, types: ['W'], req: 0, x: 18, y: 40 },
+  { id: 'o_sun', region: O, place: 'Isla Sunburst', name: 'Artesano Mateo', portrait: pidE('Porygon'), level: 3, types: ['C', 'P'], req: 1, x: 36, y: 20 },
+  { id: 'o_kin', region: O, place: 'Isla Kinnow', name: 'Nadador Tomás', portrait: pidE('Lapras'), level: 3, types: ['W', 'L'], req: 1, x: 34, y: 76 },
+  { id: 'o_moro', region: O, place: 'Isla Moro', name: 'Arqueóloga Ruth', portrait: pidE('Kabuto'), level: 3, types: ['F', 'W'], req: 1, x: 54, y: 82, prefer: ['Kabuto', 'Kabutops', 'Omanyte', 'Omastar', 'Aerodactyl'] },
+  { id: 'o_mur', region: O, place: 'Isla Murcott', name: 'Granjero Roque', portrait: pidE('Exeggcute'), level: 3, types: ['G', 'P'], req: 2, x: 54, y: 22 },
+  { id: 'o_pink', region: O, place: 'Isla Pinkan', name: 'Guardabosques Ruby', portrait: pidE('Rhyhorn'), level: 4, types: ['C', 'F'], req: 2, x: 60, y: 60 },
+  { id: 'o_mand', region: O, place: 'Islas Mandarina', name: 'Ejecutivo Silvestre', portrait: pidE('Electabuzz'), level: 4, types: ['L', 'R'], req: 2, x: 72, y: 16 },
+  { id: 'o_shamt', region: O, place: 'Isla Shamouti', name: 'Sacerdotisa Melody', portrait: pidE('Articuno'), level: 4, types: ['W', 'P'], req: 3, x: 88, y: 36 },
+  { id: 'o_law', region: O, place: 'Isla Shamouti', name: 'Coleccionista Lawrence III', portrait: pidE('Lugia'), level: 5, types: ['L', 'R', 'W', 'P'], req: 4, boss: true, perk: 'lawrence', prefer: ['Lugia', 'Articuno', 'Zapdos', 'Moltres', 'Ho-oh'], quote: 'Las tres aves legendarias y su guardián... ¡serán el centro de mi colección!' },
+  { id: 'o_kum2', region: O, place: 'Playa Kumquat', name: 'Turista Sofía', portrait: pidE('Jigglypuff'), level: 4, types: ['C', 'P'], req: 3, x: 86, y: 76 },
+  { id: 'o_pum', region: O, place: 'Puerto Pummelo', name: 'Entrenador Guay Óscar', portrait: pidE('Dragonair'), level: 5, types: ['W', 'C', 'L'], req: 4, x: 80, y: 92 },
+];
+const OROCKET = [
+  { id: 'ork1', region: O, place: 'Isla Tangelo', name: 'Jessie y James', portrait: 'base5-15', level: 3, types: ['P', 'G'], req: 0, prefer: ['Arbok', 'Weezing', 'Victreebel'], quote: '¡Prepárate para los problemas, y más vale que temas... también en las Islas Naranja!' },
+  { id: 'ork2', region: O, place: 'Islas Mandarina', name: 'Butch y Cassidy', portrait: 'base5-72', level: 4, types: ['P', 'F'], req: 2, prefer: ['Hypno', 'Golem', 'Raticate'], quote: 'Los Pokémon de estas islas valen una fortuna en el mercado negro.' },
+  { id: 'ork3', region: O, place: 'Isla Pinkan', name: 'Jessie, James y Meowth', portrait: 'base5-73', level: 5, types: ['G', 'P', 'C'], req: 3, boss: true, perk: 'rocket', prefer: ['Arbok', 'Weezing', 'Persian', 'Victreebel'], quote: '¡Los Pokémon rosas de Pinkan serán la joya del Team Rocket!' },
+];
+const OLEAGUE = { id: 'oleague', region: O, place: 'Isla Pummelo', name: 'Supremo Drake', portrait: pidE('Dragonite'), level: 5, req: 4, x: 92, y: 86, boss: true, perk: 'drake', types: ['C', 'W', 'G', 'L'], prefer: ['Dragonite', 'Dragonair', 'Dratini', 'Gyarados', 'Ditto', 'Onix', 'Steelix', 'Venusaur', 'Electabuzz'], quote: 'Soy Drake, el Supremo de la Liga Naranja. Nadie ha superado jamás a mi Dragonite.' };
+function orangeDeck(t, rng) { return P.Decks.genDeck({ types: t.types, sets: t.sets || EC_SETS, level: t.level, rng, era: 'ecard', colorless: t.types.includes('C'), prefer: t.prefer, trainers: t.level >= 2 ? ecTrainers(t.level) : undefined }); }
 const REGIONS = {
-  kanto: { id: 'kanto', name: 'Kanto', GYMS, ROUTES, ROCKET, LEAGUE, badgesKey: 'badges', home: { x: 31, y: 81, label: 'Pueblo Paleta' }, sets: KANTO_SETS },
-  johto: { id: 'johto', name: 'Johto', GYMS: JGYMS, ROUTES: JROUTES, ROCKET: JROCKET, ELITE: JELITE, LEAGUE: JLEAGUE, badgesKey: 'badgesJ', home: { x: 90, y: 74, label: 'Pueblo Primavera' }, sets: NEO_SETS, packSet: 'neo4' },
+  kanto: { id: 'kanto', name: 'Kanto', GYMS, ROUTES, ROCKET, LEAGUE, badgesKey: 'badges', champKey: 'champion', home: { x: 31, y: 81, label: 'Pueblo Paleta' }, sets: KANTO_SETS, gymSets: ['gym1', 'gym1', 'gym1', 'gym1', 'gym2', 'gym2', 'gym2', 'gym2'], rocketSet: 'base5', rocketName: 'Team Rocket', fallbackSet: 'base1', leaderMoney: 600, suffix: '', setsLabel: 'Sets de Kanto', land: '#5cae55',
+    rocketEnd: '¡Derrotaste al Team Rocket! Giovanni se retira... por ahora.', nextMsg: '🚢 ¡Ahora puedes viajar a Johto! Búscalo en el mapa.' },
+  johto: { id: 'johto', name: 'Johto', GYMS: JGYMS, ROUTES: JROUTES, ROCKET: JROCKET, ELITE: JELITE, LEAGUE: JLEAGUE, badgesKey: 'badgesJ', champKey: 'championJ', home: { x: 90, y: 74, label: 'Pueblo Primavera' }, sets: NEO_SETS, packSet: 'neo4', gymSets: ['neo1', 'neo1', 'neo2', 'neo2', 'neo3', 'neo3', 'neo4', 'neo4'], rocketSet: 'neo4', rocketName: 'Neo Destiny', fallbackSet: 'neo1', leaderMoney: 800, suffix: ' de Johto', setsLabel: 'Sets Neo', land: '#62a85a',
+    needKey: 'badges', need: 8, lockMsg: 'Johto se abre al conseguir las 8 medallas de Kanto.', rocketEnd: '¡Liberaste la Torre Radio! El Team Rocket se disuelve... ¿para siempre?', nextMsg: '⛵ ¡Ahora puedes navegar a las Islas Naranja! Búscalas en el mapa.' },
+  orange: { id: 'orange', name: 'Islas Naranja', GYMS: OGYMS, ROUTES: OROUTES, ROCKET: OROCKET, LEAGUE: OLEAGUE, badgesKey: 'badgesO', champKey: 'championO', home: { x: 10, y: 14, label: 'Isla Valencia' }, sets: EC_SETS, packSet: 'ecard3', gymSets: ['base6', 'ecard1', 'ecard2', 'ecard3'], rocketSet: 'base6', rocketName: 'Legendary Collection', fallbackSet: 'base6', leaderMoney: 1000, suffix: ' de las Islas Naranja', setsLabel: 'Sets e-Card', land: '#d9c27a',
+    needKey: 'badgesJ', need: 8, lockMsg: 'Las Islas Naranja se abren al conseguir las 8 medallas de Johto.', rocketEnd: '¡El Team Rocket sale volando de las Islas Naranja!', leagueTitle: 'Isla Pummelo — Liga Naranja', champMsg: '👑 ¡Eres el Campeón de la Liga Naranja!', leaguePack: 'ecard3' },
 };
-P.Campaign = { SETS, PACKS, openPack, PERKS, GYMS, ROUTES, ROCKET, rocketDeck, LEAGUE, STARTERS, leaderDeck, trainerDeck, starterDeck, rivalDeck, REGIONS, KANTO_SETS, NEO_SETS, JGYMS, JROUTES, JROCKET, JELITE, eliteDeck, silverDeck, johtoTrainers };
+P.Campaign = { SETS, PACKS, openPack, PERKS, GYMS, ROUTES, ROCKET, rocketDeck, LEAGUE, STARTERS, leaderDeck, trainerDeck, starterDeck, rivalDeck, REGIONS, KANTO_SETS, NEO_SETS, EC_SETS, JGYMS, JROUTES, JROCKET, JELITE, eliteDeck, silverDeck, johtoTrainers, OGYMS, OROUTES, OROCKET, OLEAGUE, orangeDeck, ecTrainers };
 })(typeof window !== 'undefined' ? window : globalThis);

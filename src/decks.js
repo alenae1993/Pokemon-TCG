@@ -42,7 +42,7 @@ function genDeck(cfg) {
   const rng = cfg.rng || Math.random;
   const LEG = /^(Lugia|Ho-oh|Celebi|Entei|Raikou|Suicune|Shining )/;
   const prefOk = d => cfg.prefer && cfg.prefer.some(n => d.name.indexOf(n) >= 0);
-  const rarOk = d => { if (cfg.era !== 'neo' || d.st !== 'P' || prefOk(d)) return true; const L = cfg.level || 2; if (L < 5 && LEG.test(d.name)) return false; if (L <= 2) return d.rar === 'C' || d.rar === 'U'; if (L === 3) return d.rar !== 'RH' && d.rar !== 'SH'; if (L === 4) return d.rar !== 'SH'; return true; };
+  const rarOk = d => { if ((cfg.era !== 'neo' && cfg.era !== 'ecard') || d.st !== 'P' || prefOk(d)) return true; const L = cfg.level || 2; if (L < 5 && LEG.test(d.name)) return false; if (L <= 2) return d.rar === 'C' || d.rar === 'U'; if (L === 3) return d.rar !== 'RH' && d.rar !== 'SH'; if (L === 4) return d.rar !== 'SH' && d.rar !== 'S'; return true; };
   const pool = (cfg.pool || P.CARDS).filter(d => (!cfg.sets || cfg.sets.includes(d.set)) && rarOk(d));
   const types = cfg.types;
   const lvl = cfg.level || 2;
@@ -76,7 +76,7 @@ function genDeck(cfg) {
   }
   // trainers
   const T = id => deck.push(id);
-  const tr = cfg.trainers || (cfg.era === 'neo' ? neoTrainers(lvl) : defaultTrainers(lvl, owner, rng));
+  const tr = cfg.trainers || (cfg.era === 'neo' ? neoTrainers(lvl) : cfg.era === 'ecard' ? ecardTrainers(lvl) : defaultTrainers(lvl, owner, rng));
   const eLeft = types.some(t => SPECIAL_T[t]) ? 14 : 16;
   for (const id of tr) { const d = P.DB[id]; if (deck.length < 60 - eLeft && (nameCount[d.name] || 0) < maxCopies(d)) { nameCount[d.name] = (nameCount[d.name] || 0) + 1; T(id); } }
   // energía
@@ -89,6 +89,13 @@ function neoTrainers(lvl) {
   if (lvl <= 1) { push('Bill', 3); push('Potion', 3); push('Switch', 1); push('Energy Ark', 1); }
   else if (lvl === 2) { push('Bill', 3); push('Professor Elm', 1); push('Potion', 2); push('Switch', 2); push('Berry', 2); push('Energy Ark', 1); push('Pokémon March', 1); }
   else { push('Professor Elm', 3); push('Bill', 2); push('Pokémon Breeder Fields', 2); push('Gust of Wind', 2); push('Focus Band', 2); push('Energy Removal', 2); push('Super Energy Removal', 1); push('Gold Berry', 1); push('Switch', 1); push('PlusPower', 1); }
+  return t;
+}
+function ecardTrainers(lvl) {
+  const t = []; const push = (n, k) => { const id = idOf(n); if (id) for (let i = 0; i < k; i++) t.push(id); };
+  if (lvl <= 1) { push("Bill's Maintenance", 2); push('Potion', 3); push('Dual Ball', 2); push('Switch', 1); }
+  else if (lvl === 2) { push("Bill's Maintenance", 2); push("Professor Elm's Training Method", 2); push('Dual Ball', 2); push('Potion', 2); push('Switch', 1); push('Energy Restore', 1); push('Strength Charm', 1); }
+  else { push("Professor Oak's Research", 2); push("Bill's Maintenance", 2); push("Professor Elm's Training Method", 2); push('Copycat', 1); push('Pokémon Fan Club', 1); push('Pokémon Reversal', 2); push('Energy Removal 2', 2); push('Strength Charm', 2); push('Hyper Potion', 1); push('Switch', 1); }
   return t;
 }
 function defaultTrainers(lvl, owner, rng) {

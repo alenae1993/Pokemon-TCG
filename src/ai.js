@@ -118,6 +118,8 @@ function pickCards(g, p, req) {
     case 'discardOppEnergy': { score = c => (g.def(c).name === 'Double Colorless Energy' ? 20 : 0) + (c.buzzap ? 25 : 0) + (g.def(c).basic ? 5 : 10); break; }
     case 'discardHand': case 'quiz': score = c => -cardValue(g, p, c); break;
     case 'perfume': score = c => -g.def(c).hp; break;
+    case 'eggsplosion': return cards.slice(0, Math.max(min, Math.min(max, req.want || 0)));
+    case 'crushingLava': { const d = o.active; const f = cards.find(c => g.def(c).name === 'Fire Energy'); const fi = cards.find(c => g.def(c).name === 'Fighting Energy'); if (fi && d && g.hpLeft(d) > 40) return [fi]; if (f && d && !d.burn) return [f]; return []; }
     default: score = c => cardValue(g, p, c);
   }
   const n = Math.max(min, Math.min(max, pur === 'discardHand' && min === 0 ? 0 : max));
@@ -152,6 +154,9 @@ function pickSlot(g, p, req) {
       const b = best(s => g.hpLeft(s) + slotValue(g, s, o)); return g.hpLeft(b) > g.hpLeft(p.active) ? b : null;
     }
     case 'moveOppEnergy': return best(s => -g.energyCount(s));
+    case 'chaosFrom': return best(s => s.owner === p.i ? s.dmg : -100);
+    case 'chaosTo': return best(s => s.owner !== p.i ? 100 - g.hpLeft(s) : -100);
+    case 'nurse': return best(s => s.dmg - s.energy.length * 15);
     default: return opts[0];
   }
 }
@@ -211,7 +216,7 @@ AI.takeTurn = async function (g, p) {
     for (const c of p.hand.filter(c => g.def(c).name === 'Water Energy')) { const ts = g.slots(p).filter(s => g.canAttach(p, c, s) && g.eff(s).types.includes('W')); if (ts.length) await g.attach(p, c, pickSlot(g, p, { options: ts, purpose: 'energyTarget' })); }
   }
   if (p.flags.blaine) for (const c of p.hand.filter(c => g.def(c).name === 'Fire Energy')) { const ts = g.slots(p).filter(s => g.canAttach(p, c, s)); if (ts.length) await g.attach(p, c, ts[0]); }
-  if (p.perk === 'misty' && !p.mistyExtra) { const c = p.hand.find(c => g.def(c).name === 'Water Energy'); if (c) { const ts = g.slots(p).filter(s => g.canAttach(p, c, s)); if (ts.length) await g.attach(p, c, pickSlot(g, p, { options: ts, purpose: 'energyTarget' })); } }
+  if ((p.perk === 'misty' || p.perk === 'cissy') && !p.mistyExtra) { const c = p.hand.find(c => g.def(c).name === 'Water Energy'); if (c) { const ts = g.slots(p).filter(s => g.canAttach(p, c, s)); if (ts.length) await g.attach(p, c, pickSlot(g, p, { options: ts, purpose: 'energyTarget' })); } }
   if (!ok() || !p.active) return;
   // poderes otra vez (Energy Burn etc.)
   for (const s of g.slots(p)) { const d = g.baseDef(s); if (!d.pw) continue; const P = FX.pw[d.pw.name]; if (g.powerUsable(p, s) && P.ai && P.ai(g, p, s)) await g.usePower(p, s); }
