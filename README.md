@@ -6,6 +6,8 @@ Al conseguir las 8 medallas de Kanto se abre **Johto**, con las expansiones **Ne
 
 Al conseguir las 8 medallas de Johto se abren las **Islas Naranja**, con **Legendary Collection** y el bloque **e-Card** (**Expedition, Aquapolis y Skyridge**): 4 gimnasios (Cissy, Danny, Rudy y Luana), la Liga Naranja del Supremo Drake, Lawrence III en Isla Shamouti y el Team Rocket. Incluye el estado Quemado, cartas de Partidario (1 por turno), Máquinas Técnicas, Poké-Powers y Poké-Bodies, Pokémon Cristal y las nuevas Energías especiales (Impulso, Cristal, Teletransporte, Rebote, Ciclón y Retro).
 
+**En línea (v12):** pestaña *En línea* para jugar un combate amistoso contra un amigo con tu propio mazo o intercambiar cartas. Uno pulsa *Crear sala* y comparte el código de 5 letras; el otro lo escribe en *Unirse*. En la app del celular la conexión es directa (WebRTC vía PeerJS). Los intercambios sólo se aceptan si las dos ofertas tienen la misma cantidad de cartas de cada rareza, y sólo se pueden ofrecer copias que no estén en tus mazos. Las cartas que consigues por primera vez muestran la etiqueta **¡NUEVA!**.
+
 ## Publicar en GitHub Pages
 1. Crea un repositorio nuevo en GitHub (por ejemplo `liga-kanto`).
 2. Sube **todo el contenido de esta carpeta** a la raíz del repositorio (index.html, manifest.webmanifest, sw.js, .nojekyll y las carpetas `src`, `assets`, `icons`).

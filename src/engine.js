@@ -62,6 +62,7 @@ class GameOver extends Error { constructor(w) { super('over'); this.winner = w; 
 class Game {
   constructor(opts) {
     this.rnd = opts.rng || Math.random;
+    this._uid = opts.uidBase || UID; // partidas en línea: ids idénticos en ambos equipos (contador por partida)
     this.io = opts.io;            // {ask(g,p,req), flip(g,p,results,label), log(g,msg), update(g), anim}
     this.ai = opts.ai;            // módulo IA
     this.p = [0, 1].map(i => this.mkPlayer(i, opts.players[i]));
@@ -77,7 +78,8 @@ class Game {
     pl.deck.forEach(c => c.owner = i);
     return pl;
   }
-  inst(id) { if (!DB[id]) throw new Error('Carta desconocida ' + id); return { u: UID++, d: id }; }
+  inst(id) { if (!DB[id]) throw new Error('Carta desconocida ' + id); return { u: this.nextU(), d: id }; }
+  nextU() { const u = this._uid++; if (UID <= u) UID = u + 1; return u; }
   def(c) { return DB[c.d]; }
   opp(p) { return this.p[1 - p.i]; }
   log(m) { this.logs.push(m); if (this.io.log) this.io.log(this, m); }
@@ -333,7 +335,7 @@ class Game {
   }
 
   // ---------- movimientos de cartas ----------
-  mkSlot(p, card) { return { u: UID++, owner: p.i, cards: [card], energy: [], att: [], dmg: 0, st: null, poison: 0, parT: 0, played: this.turnNo, evolved: -1, fx: {}, persist: {} }; }
+  mkSlot(p, card) { return { u: this.nextU(), owner: p.i, cards: [card], energy: [], att: [], dmg: 0, st: null, poison: 0, parT: 0, played: this.turnNo, evolved: -1, fx: {}, persist: {} }; }
   slotCards(slot) { return slot.cards.concat(slot.energy, slot.att); }
   removeSlot(slot) {
     const p = this.ownerOf(slot);
