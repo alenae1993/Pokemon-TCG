@@ -8,6 +8,8 @@ Al conseguir las 8 medallas de Johto se abren las **Islas Naranja**, con **Legen
 
 **En línea (v12):** pestaña *En línea* para jugar un combate amistoso contra un amigo con tu propio mazo o intercambiar cartas. Uno pulsa *Crear sala* y comparte el código de 5 letras; el otro lo escribe en *Unirse*. En la app del celular la conexión es directa (WebRTC vía PeerJS). Los intercambios sólo se aceptan si las dos ofertas tienen la misma cantidad de cartas de cada rareza, y sólo se pueden ofrecer copias que no estén en tus mazos. Las cartas que consigues por primera vez muestran la etiqueta **¡NUEVA!**.
 
+**Era Mega (v13):** al iniciar el juego eliges la era: **WOTC** (todo lo anterior) o **Mega** (Megaevolución y Fuegos Fantasmales, 2025). Cada era tiene su propia partida, colección y dinero. La era Mega usa reglas modernas: Pokémon ex (2 Premios) y Megaevolución ex (3 Premios), Habilidades, Partidarios, Herramientas y Estadios, quemadura moderna, y quien empieza no puede atacar ni jugar Partidarios en su primer turno. La campaña es una lista de entrenadores por niveles: 4 novatos al principio, y cada nivel completo desbloquea 5 rivales más fuertes, hasta el Alto Mando y la Campeona.
+
 ## Publicar en GitHub Pages
 1. Crea un repositorio nuevo en GitHub (por ejemplo `liga-kanto`).
 2. Sube **todo el contenido de esta carpeta** a la raíz del repositorio (index.html, manifest.webmanifest, sw.js, .nojekyll y las carpetas `src`, `assets`, `icons`).

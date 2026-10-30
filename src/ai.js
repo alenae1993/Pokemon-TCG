@@ -16,15 +16,17 @@ function estDmg(g, att, def, a) {
   let base = parseInt(a.dmg) || 0;
   const s = String(a.dmg || '');
   const F = FX.atk[a.fx];
-  if (s.includes('×')) {
+  if (F && F.est) { base = F.est(g, att, def, a); }
+  else if (s.includes('×')) {
     const m = (a.text || '').match(/Flip (\d+) coins/); const n = m ? +m[1] : 2;
     if (/until you get tails/.test(a.text || '')) base = base * 1; else if (/number of Energy/.test(a.text || '')) base = base * g.energyCount(att) / 2; else if (/damage counters on/.test(a.text || '')) base = att.dmg ? base * att.dmg / 10 : 0; else base = base * n / 2;
   } else if (s.includes('+')) base += 10;
-  if (/If tails, this attack does nothing/.test(a.text || '')) base /= 2;
+  if (/If tails, this attack does nothing/.test(a.text || '') && !(F && F.est)) base /= 2;
   if (!def) return base;
   const ae = g.eff(att), de = g.eff(def);
   if (de.weak && ae.types.includes(de.weak)) base *= 2;
-  if (de.res && ae.types.includes(de.res)) base -= 30;
+  if (de.res && ae.types.includes(de.res)) base -= (de.d && de.d.resV) || 30;
+  if (g.modern && g.hooks && base > 0) { base = g.hooks.postWR(g, { att, me: g.ownerOf(att), op: g.ownerOf(def) }, def, base); if (def.fx.reduce) base = Math.max(0, base - def.fx.reduce.v); }
   if (def.fx.preventAll || def.fx.immune) base = 0;
   if (def.fx.harden && base <= 30) base = 0;
   if (g.powerActive(def, 'Invisible Wall') && base >= 30) base = 0;
@@ -67,6 +69,8 @@ AI.decide = async function (g, p, req) {
       if (pur === 'wishAccept') return false;
       if (pur === 'challenge') return p.bench.length < 3;
       if (pur === 'optionalDiscard') return o.bench.some(s => g.hpLeft(s) <= 10);
+      if (pur === 'allIn' || pur === 'voltaic') return !!req.want;
+      if (pur === 'bargain') return req.mine < req.theirs;
       return true;
     case 'option': {
       const n = req.options.length;
@@ -110,9 +114,14 @@ function pickCards(g, p, req) {
     const sorted = cards.slice().sort((a, b) => keep(a) - keep(b) || req.valueOf(a) - req.valueOf(b));
     const out = []; let sum = 0; for (const c of sorted) { if (sum >= req.sumTo) break; out.push(c); sum += req.valueOf(c); } return out;
   }
+  if (req.want != null && (pur === 'infernoX')) return cards.slice(0, Math.max(min, Math.min(max, req.want)));
   let score;
   switch (pur) {
     case 'setupActive': score = c => { const d = g.def(c); const cheap = Math.min(...(d.atk.length ? d.atk.map(a => a.cost.length) : [5])); return d.hp - cheap * 12 + (d.atk.some(a => parseInt(a.dmg) >= 20 && a.cost.length <= 2) ? 20 : 0) - (d.pw && ['Rain Dance', 'Energy Trans', 'Damage Swap'].includes(d.pw.name) ? 40 : 0); }; break;
+    case 'discardOppHand': score = c => cardValue(g, o, c); break;
+    case 'searchAny': case 'searchHand': case 'recover': score = c => cardValue(g, p, c) + (g.def(c).ex ? 20 : 0); break;
+    case 'evolveCard': score = c => g.def(c).hp; break;
+    case 'moveEnergy': return cards.slice(0, max);
     case 'setupBench': case 'searchBasic': case 'attachFromHand': case 'getEnergy': case 'perfume_': return cards.slice(0, max);
     case 'discardOwnEnergy': case 'payOwnEnergy': { const s = req.slot; const best = s ? bestAttack(g, p, s, o.active) : null; score = c => -((best && best.a.cost.includes(tokOf(g, c)[0])) ? 10 : 0) - (g.def(c).name === 'Double Colorless Energy' ? 5 : 0); break; }
     case 'discardOppEnergy': { score = c => (g.def(c).name === 'Double Colorless Energy' ? 20 : 0) + (c.buzzap ? 25 : 0) + (g.def(c).basic ? 5 : 10); break; }
@@ -204,6 +213,7 @@ AI.takeTurn = async function (g, p) {
     const d = g.baseDef(s); if (!d.pw) continue; const P = FX.pw[d.pw.name];
     while (ok() && guard++ < 10 && g.powerUsable(p, s) && P.ai && P.ai(g, p, s)) { await g.usePower(p, s); await sleep(350); if (P.once) break; }
   }
+  { const st = g.stadiumAction(p); if (st && st.aiAction && ok() && st.aiAction(g, p)) { await g.useStadium(p); await sleep(300); } }
   if (!ok() || !p.active) return;
   // 5. retirada / cambio
   if (L >= 2) await maybeRetreat(g, p);

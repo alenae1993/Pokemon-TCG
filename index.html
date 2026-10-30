@@ -291,6 +291,13 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .coinpick button.lock .cf { filter: grayscale(1) brightness(.25); }
 /* ---- inicio ---- */
 #title { background: radial-gradient(circle at 50% 30%, #234a80, #060c16 70%); align-items: center; justify-content: center; overflow: auto; }
+.eras { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; width: min(900px, 100%); }
+.era { background: var(--panel); border: 2px solid var(--line); border-radius: 14px; padding: 16px; display: flex; gap: 14px; cursor: pointer; text-align: left; color: var(--ink); align-items: flex-start; }
+.era:hover, .era.on { border-color: var(--gold); background: var(--panel2); }
+.era .card { --cw: 110px; flex: none; }
+.tier.locked { opacity: .6; }
+.tlist { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px; margin-top: 8px; }
+.symtxt { font: 700 11px var(--f-cond, sans-serif); background: #1d2b44; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--gold); }
 #title .logo { font-family: var(--f-display); font-size: clamp(34px, 7vw, 76px); color: var(--gold); text-shadow: 4px 4px 0 #2a4d8f, 8px 8px 0 rgba(0,0,0,.4); text-align: center; line-height: 1; }
 .starters { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; width: min(900px, 100%); }
 .starter { background: var(--panel); border: 2px solid var(--line); border-radius: 12px; padding: 12px; display: flex; gap: 10px; cursor: pointer; text-align: left; color: var(--ink); }
@@ -433,14 +440,18 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 
 <script src="src/engine.js"></script>
 <script src="src/data.js"></script>
+<script src="src/data_mega.js"></script>
 <script src="src/fx_atk.js"></script>
 <script src="src/fx_pw.js"></script>
 <script src="src/fx_tr.js"></script>
 <script src="src/fx_neo.js"></script>
 <script src="src/fx_ecard.js"></script>
+<script src="src/fx_mega.js"></script>
 <script src="src/ai.js"></script>
 <script src="src/decks.js"></script>
 <script src="src/campaign.js"></script>
+<script src="src/campaign_mega.js"></script>
+<script src="src/era.js"></script>
 <script src="src/ui.js"></script>
 <script>
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

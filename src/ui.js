@@ -2,16 +2,20 @@
 (function () {
 'use strict';
 const P = window.PTCG, C = P.Campaign, DB = P.DB;
+const MEGA = !!C.mega, ERA = MEGA ? 'mega' : 'wotc'; // era elegida al iniciar (ver src/era.js)
 const $ = (s, r = document) => r.querySelector(s);
 const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k === 'style') e.style.cssText = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v); } for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k))); return e; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const TYPES = { G: 'Planta', R: 'Fuego', W: 'Agua', L: 'Rayo', P: 'Psíquico', F: 'Lucha', C: 'Incoloro', D: 'Siniestro', M: 'Metálico' };
-const RARES = { C: 'Común', U: 'Poco común', R: 'Rara', RH: 'Rara Holo', SH: 'Brillante', S: 'Secreta', E: 'Energía' };
-const RSYM = { C: '●', U: '◆', R: '★', RH: '★H', SH: '✦', S: '★S', E: '' };
-const SETNAME = Object.fromEntries(C.SETS.map(s => [s.id, s.name]));
-const ENERGY_BASIC = ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
+const TYPES = { G: 'Planta', R: 'Fuego', W: 'Agua', L: 'Rayo', P: 'Psíquico', F: 'Lucha', C: 'Incoloro', N: 'Dragón', D: 'Siniestro', M: 'Metálico' };
+const RARES = { C: 'Común', U: 'Poco común', R: 'Rara', RH: 'Rara Holo', SH: 'Brillante', S: 'Secreta', E: 'Energía' , RR: 'Doble rara', IR: 'Ilustración rara', UR: 'Ultra rara', SIR: 'Ilustración especial rara', MHR: 'Mega hiper rara'};
+const RSYM = { C: '●', U: '◆', R: '★', RH: '★H', SH: '✦', S: '★S', E: '', RR: '★★', IR: '★I', UR: '★★★', SIR: '★IE', MHR: '★MH' };
+const BIGRARE = r => ['RH', 'S', 'SH', 'RR', 'IR', 'UR', 'SIR', 'MHR'].includes(r);
+const SETNAME = Object.fromEntries(C.SETS.map(s => [s.id, s.name])); if (MEGA) SETNAME.mee = 'Energía básica';
+if (MEGA) { try { document.querySelector('#topbar .brand').textContent = 'LIGA MEGA'; document.title = 'Liga Mega TCG'; } catch (e) {} }
+const ENERGY_BASIC = MEGA ? C.ENERGY_BASIC : ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
+const ENERGY_ID = MEGA ? C.ENERGY_ID : P.Decks.ENERGY_ID;
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v12 · En línea: combate e intercambio';
+const APP_VERSION = 'v13 · Era Mega: Megaevolución + Fuegos Fantasmales';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}
@@ -20,7 +24,7 @@ async function forceUpdate() {
 }
 
 // ---------- guardado ----------
-const SAVE_KEY = 'ptcg_kanto_save_v1';
+const SAVE_KEY = MEGA ? 'ptcg_mega_save_v1' : 'ptcg_kanto_save_v1';
 let S = null; let dbRef = null; let saveTimer = null;
 function defaultSave() { return { v: 1, name: '', money: 0, coll: {}, packs: {}, decks: [], activeDeck: 0, badges: [], badgesJ: [], badgesO: [], region: 'kanto', championJ: false, championO: false, beaten: {}, coins: [0, 2, 4, 6], coin: 0, stats: { wins: 0, losses: 0 }, opts: { speed: 1 }, champion: false, created: Date.now(), updated: 0 }; }
 function lsGet() { try { const t = localStorage.getItem(SAVE_KEY); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
@@ -32,7 +36,7 @@ async function initCloud() {
     const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
     if (!db || !user) return;
     const id = await user.id(); if (!id) return;
-    dbRef = db.doc('data/users/' + id + '/save');
+    dbRef = db.doc('data/users/' + id + (MEGA ? '/save_mega' : '/save'));
     const snap = await dbRef.get();
     if (snap.exists) { const d = snap.data(); const remote = JSON.parse(d.json); if (!S || (remote.updated || 0) > (S.updated || 0)) { S = Object.assign(defaultSave(), remote); lsSet(S); if (S.name) showHub(); toast('Partida recuperada de la nube'); } }
     else if (S && S.name) save();
@@ -47,11 +51,11 @@ function cardEl(id, opts = {}) {
   const [sheet, idx] = d.img; const col = idx % 5, row = Math.floor(idx / 5);
   e.style.backgroundImage = `url(assets/cards${String(sheet).padStart(2, '0')}.webp)`;
   e.style.backgroundPosition = `${col * 25}% ${row * 33.3333}%`;
-  if (opts.holo !== false && (d.rar === 'RH' || d.rar === 'S')) e.classList.add('holo');
+  if (opts.holo !== false && (d.rar === 'RH' || d.rar === 'S' || d.rar === 'UR' || d.rar === 'SIR' || d.rar === 'MHR')) e.classList.add('holo');
   return e;
 }
 // carta dibujada (cuando no hay imagen escaneada)
-const SETCODE = Object.fromEntries(C.SETS.map(s => [s.id, s.code]));
+const SETCODE = Object.fromEntries(C.SETS.map(s => [s.id, s.code])); if (MEGA) SETCODE.mee = 'MEE';
 function drawCard(e, d) {
   e.classList.add('drawn');
   const ty = d.st === 'P' ? d.types[0] : d.st === 'E' ? (d.etype || 'C') : 'T';
@@ -111,8 +115,8 @@ const REG = () => C.REGIONS[C.REGIONS[S.region] && regionOpen(S.region) ? S.regi
 const regionOf = x => C.REGIONS[x && C.REGIONS[x.region] ? x.region : 'kanto'];
 const badgesOf = r => S[r.badgesKey] || (S[r.badgesKey] = []);
 const hasBadge = g => badgesOf(regionOf(g)).includes(g.id);
-const setLocked = s => { const r = C.REGIONS[s.region || 'kanto']; return !regionOpen(r.id) || badgesOf(r).length < s.unlock; };
-const setLockMsg = s => { const r = C.REGIONS[s.region || 'kanto']; return !regionOpen(r.id) ? '🔒 ' + r.lockMsg : `🔒 Se desbloquea con ${s.unlock} medalla(s)${r.suffix}`; };
+const setLocked = s => { if (MEGA) return C.curTier(S) < s.tier; const r = C.REGIONS[s.region || 'kanto']; return !regionOpen(r.id) || badgesOf(r).length < s.unlock; };
+const setLockMsg = s => { if (MEGA) return `🔒 Se desbloquea al llegar al nivel ${s.tier + 1} (${C.TIERS[s.tier].name})`; const r = C.REGIONS[s.region || 'kanto']; return !regionOpen(r.id) ? '🔒 ' + r.lockMsg : `🔒 Se desbloquea con ${s.unlock} medalla(s)${r.suffix}`; };
 function coinFace(i, tails) { const c = 2 * (i % 16) + (tails ? 1 : 0), r = Math.floor(i / 16); return `background-position:${c * 100 / 31}% ${r * 100 / 9}%`; }
 const COIN_COUNT = 152;
 
@@ -142,18 +146,20 @@ if (TOUCH) {
 // ---------- zoom (hover) ----------
 const zoom = $('#zoom'); let zoomTarget = null;
 function costIcons(cost) { const s = el('span'); cost.forEach(t => s.append(eIcon(t))); return s; }
+const rich = txt => { const out = el('span'); String(txt || '').split(/\{([GRWLPFDMCN])\}/).forEach((x, i) => out.append(i % 2 ? eIcon(x) : x)); return out; };
 function cardText(d, slotInfo) {
   const t = el('div', { class: 'txt' });
   if (d.st === 'P') {
     const e = slotInfo ? slotInfo.e : null;
     t.append(el('h3', {}, (e ? e.nameEs : d.nameEs)), el('div', { class: 'sub' }, `${STAGE[d.stage]}${d.from ? ' · evoluciona de ' + P.DB[Object.keys(DB).find(k => DB[k].name === d.from)]?.nameEs : ''} · ${e ? e.hp : d.hp} PS · `, ...(e ? e.types : d.types).map(eIcon), ` · ${SETNAME[d.set]} #${d.num} ${RARES[d.rar] || ''}`));
-    if (d.pw) t.append(el('div', { class: 'pw' }, el('b', {}, 'Poder Pokémon: ' + d.pw.nameEs), el('div', {}, d.pw.es)));
+    if (d.pw) t.append(el('div', { class: 'pw' }, el('b', {}, (d.pw.ability ? 'Habilidad: ' : 'Poder Pokémon: ') + d.pw.nameEs), el('div', {}, rich(d.pw.es))));
     const atks = e ? e.atk : d.atk;
-    for (const a of atks) t.append(el('div', { class: 'atk' }, costIcons(a.cost), ' ', el('b', {}, a.nameEs), el('span', { class: 'dm' }, a.dmg || ''), a.es ? el('div', {}, a.es) : null));
+    for (const a of atks) t.append(el('div', { class: 'atk' }, costIcons(a.cost), ' ', el('b', {}, a.nameEs), el('span', { class: 'dm' }, a.dmg || ''), a.es ? el('div', {}, rich(a.es)) : null));
     const w = e ? e.weak : d.weak, r = e ? e.res : d.res;
-    t.append(el('div', { class: 'foot' }, el('span', {}, 'Debilidad: ', w ? eIcon(w) : '—', w ? ' ×2' : ''), el('span', {}, 'Resistencia: ', r ? eIcon(r) : '—', r ? ' −30' : ''), el('span', {}, 'Retirada: ', ...(Array(d.ret).fill('C').map(eIcon)), d.ret ? '' : '0')));
+    t.append(el('div', { class: 'foot' }, el('span', {}, 'Debilidad: ', w ? eIcon(w) : '—', w ? ' ×2' : ''), el('span', {}, 'Resistencia: ', r ? eIcon(r) : '—', r ? ' −' + (d.resV || 30) : ''), el('span', {}, 'Retirada: ', ...(Array(d.ret).fill('C').map(eIcon)), d.ret ? '' : '0')));
+    if (d.ex) t.append(el('div', { class: 'muted', style: 'font-size:12px;margin-top:4px' }, d.mega ? 'Regla Megaevolución ex: si queda Fuera de Combate, tu rival toma 3 cartas de Premio.' : 'Regla Pokémon ex: si queda Fuera de Combate, tu rival toma 2 cartas de Premio.'));
   } else {
-    t.append(el('h3', {}, d.nameEs), el('div', { class: 'sub' }, d.st === 'E' ? (d.basic ? 'Energía básica' : 'Energía especial') : ((d.sub || []).includes('Stadium') ? 'Entrenador · Estadio' : (d.sub || []).length && d.sub[0] === "Rocket's Secret Machine" ? 'Entrenador · Máquina Secreta del Team Rocket' : 'Entrenador'), ` · ${SETNAME[d.set]} #${d.num}`), el('div', {}, d.es));
+    t.append(el('h3', {}, d.nameEs), el('div', { class: 'sub' }, d.st === 'E' ? (d.basic ? 'Energía básica' : 'Energía especial') : ((d.sub || []).includes('Stadium') ? 'Entrenador · Estadio' : (d.sub || []).includes('Supporter') ? 'Entrenador · Partidario' : (d.sub || []).includes('Pokémon Tool') ? 'Entrenador · Herramienta Pokémon' : (d.sub || []).includes('Item') ? 'Entrenador · Objeto' : (d.sub || []).length && d.sub[0] === "Rocket's Secret Machine" ? 'Entrenador · Máquina Secreta del Team Rocket' : 'Entrenador'), ` · ${SETNAME[d.set]} #${d.num}`), el('div', {}, rich(d.es)));
   }
   if (slotInfo && slotInfo.live) t.append(slotInfo.live);
   return t;
@@ -193,15 +199,15 @@ function showTitle() {
   for (const s of document.querySelectorAll('.screen')) s.hidden = true;
   const t = $('#title'); t.hidden = false; t.innerHTML = '';
   const wrap = el('div', { style: 'display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px 16px;width:100%;' });
-  wrap.append(el('div', { class: 'logo' }, 'LIGA KANTO', el('br'), el('span', { style: 'font-size:.42em;color:var(--ink);text-shadow:none' }, 'JUEGO DE CARTAS COLECCIONABLES')));
+  wrap.append(el('div', { class: 'logo' }, MEGA ? 'LIGA MEGA' : 'LIGA KANTO', el('br'), el('span', { style: 'font-size:.42em;color:var(--ink);text-shadow:none' }, 'JUEGO DE CARTAS COLECCIONABLES')));
   wrap.append(el('div', { class: 'muted', style: 'font-size:12px' }, APP_VERSION));
-  wrap.append(el('div', { class: 'muted', style: 'max-width:640px;text-align:center' }, 'Base Set, Jungle, Fossil, Base Set 2, Team Rocket, Gym Heroes y Gym Challenge. Abre sobres, arma tu mazo y vence a los 8 líderes de gimnasio de Kanto.'));
+  wrap.append(el('div', { class: 'muted', style: 'max-width:640px;text-align:center' }, MEGA ? 'Era Mega: Megaevolución y Fuegos Fantasmales, con reglas modernas (Pokémon ex, Habilidades, Partidarios). Vence a la lista de entrenadores y desbloquea niveles cada vez más difíciles.' : 'Base Set, Jungle, Fossil, Base Set 2, Team Rocket, Gym Heroes y Gym Challenge. Abre sobres, arma tu mazo y vence a los 8 líderes de gimnasio de Kanto.'), el('button', { onclick: showEraPick }, '⇄ Cambiar de era (' + (MEGA ? 'Mega' : 'WOTC') + ')'));
   let pick = 0;
   const nameIn = el('input', { id: 'pname', placeholder: 'Tu nombre de entrenador', maxlength: 18, value: 'Rojo' });
   const grid = el('div', { class: 'starters' });
   const draw = () => { grid.innerHTML = ''; C.STARTERS.forEach((s, i) => grid.append(el('button', { class: 'starter' + (i === pick ? ' on' : ''), onclick: () => { pick = i; draw(); } }, cardEl(s.cover), el('div', {}, el('b', { class: 'cond', style: 'font-size:18px' }, s.name), el('div', { class: 'muted', style: 'font-size:13px' }, s.desc), el('div', {}, ...s.types.map(eIcon)))))); };
   draw();
-  wrap.append(el('div', { class: 'panel', style: 'display:flex;flex-direction:column;gap:12px;width:min(900px,100%)' }, el('h2', { class: 'cond', style: 'color:var(--gold)' }, 'Nueva partida'), el('label', { for: 'pname' }, 'Nombre: ', nameIn), el('div', {}, 'Elige tu mazo inicial (sólo cartas de Base Set):'), grid,
+  wrap.append(el('div', { class: 'panel', style: 'display:flex;flex-direction:column;gap:12px;width:min(900px,100%)' }, el('h2', { class: 'cond', style: 'color:var(--gold)' }, 'Nueva partida'), el('label', { for: 'pname' }, 'Nombre: ', nameIn), el('div', {}, MEGA ? 'Elige tu mazo inicial (cartas de Megaevolución):' : 'Elige tu mazo inicial (sólo cartas de Base Set):'), grid,
     el('div', { class: 'btns', style: 'display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap' },
       lsGet() && lsGet().name ? el('button', { onclick: () => { S = Object.assign(defaultSave(), lsGet()); showHub(); } }, 'Continuar partida guardada') : null,
       el('button', { onclick: importSave }, 'Importar partida'),
@@ -214,8 +220,8 @@ function newGame(name, starterIdx) {
   const deck = C.starterDeck(st, Math.random);
   addCards(deck.filter(id => !ENERGY_BASIC.includes(id)));
   S.decks = [{ name: st.name, cards: deck }]; S.activeDeck = 0;
-  S.packs = { base1: 4 }; S.money = 300;
-  save(); showHub('shop'); toast('¡Bienvenido! Tienes 4 sobres de Base Set para abrir.', 3500);
+  S.packs = MEGA ? { me01: 4 } : { base1: 4 }; S.money = 300;
+  save(); showHub('shop'); toast(`¡Bienvenido! Tienes 4 sobres de ${MEGA ? 'Megaevolución' : 'Base Set'} para abrir.`, 3500);
 }
 function importSave() {
   const inp = el('input', { type: 'file', accept: '.json,application/json' });
@@ -233,7 +239,7 @@ async function exportSave() {
 
 // ================= HUB =================
 let curView = 'map';
-const NAV = [['map', 'Mapa'], ['shop', 'Tienda'], ['coll', 'Colección'], ['decks', 'Mazos'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']];
+const NAV = [['map', MEGA ? 'Entrenadores' : 'Mapa'], ['shop', 'Tienda'], ['coll', 'Colección'], ['decks', 'Mazos'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']];
 function showHub(view) {
   for (const s of document.querySelectorAll('.screen')) s.hidden = true;
   $('#hubscreen').hidden = false; if (view) curView = view; renderTop(); renderView();
@@ -241,11 +247,11 @@ function showHub(view) {
 function renderTop() {
   const nav = $('#nav'); nav.innerHTML = '';
   for (const [k, l] of NAV) nav.append(el('button', { class: curView === k ? 'on' : '', onclick: () => { curView = k; renderTop(); renderView(); } }, l + (k === 'shop' && packCount() ? ` (${packCount()})` : '') + (k === 'coll' && newCount() ? ` ★${newCount()}` : '') + (k === 'online' && NET.link ? ' ●' : '')));
-  const b = $('#badges'); b.innerHTML = ''; for (const g of REG().GYMS) b.append(badgeEl(g.badge, !hasBadge(g)));
+  const b = $('#badges'); b.innerHTML = ''; if (MEGA) { const k = C.curTier(S); b.append(el('span', { class: 'cond', style: 'color:var(--gold);font-size:15px' }, `Nivel ${k + 1}: ${C.TIERS[k].name}`, el('span', { class: 'muted', style: 'font-size:12px' }, ` · ${C.TRAINERS.filter(t => S.beaten[t.id]).length}/${C.TRAINERS.length} vencidos`))); } else for (const g of REG().GYMS) b.append(badgeEl(g.badge, !hasBadge(g)));
   $('#money').textContent = `₽ ${S.money.toLocaleString('es-CL')}`;
 }
 const packCount = () => Object.values(S.packs).reduce((a, b) => a + b, 0);
-function renderView() { const v = $('#view'); v.innerHTML = ''; ({ map: viewMap, shop: viewShop, coll: viewColl, decks: viewDecks, online: viewOnline, coins: viewCoins, opts: viewOpts })[curView](v); }
+function renderView() { const v = $('#view'); v.innerHTML = ''; ({ map: MEGA ? viewTrainers : viewMap, shop: viewShop, coll: viewColl, decks: viewDecks, online: viewOnline, coins: viewCoins, opts: viewOpts })[curView](v); }
 
 // ---------- mapa ----------
 const LAND = {
@@ -274,6 +280,68 @@ const LAND = {
       <path d="M10 9 L18 25 L26 16.5 L36 12.5 L54 14 L72 10 L88 22.5 L80 42.5 L92 54"/><path d="M26 16.5 L44 31 L34 47.5 L54 51 L60 37.5 L66 25"/><path d="M44 31 L60 37.5 L80 42.5"/>
     </g>`,
 };
+// ---------- selector de era ----------
+function eraSaveInfo(key) { try { const d = JSON.parse(localStorage.getItem(key) || 'null'); return d && d.name ? d : null; } catch (e) { return null; } }
+function showEraPick() {
+  for (const s of document.querySelectorAll('.screen')) s.hidden = true;
+  const t = $('#title'); t.hidden = false; t.innerHTML = '';
+  const wrap = el('div', { style: 'display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px 16px;width:100%;' });
+  wrap.append(el('div', { class: 'logo' }, 'POKÉMON TCG', el('br'), el('span', { style: 'font-size:.42em;color:var(--ink);text-shadow:none' }, '¿QUÉ ERA JUGAMOS HOY?')), el('div', { class: 'muted', style: 'font-size:12px' }, APP_VERSION));
+  const megaCover = (P.CARDS_MEGA || []).find(d => d.name === 'Mega Charizard X ex');
+  const ERAS = [
+    { id: 'wotc', name: 'Era WOTC', years: '1999 – 2003', desc: 'De Base Set a e-Card: Kanto, Johto e Islas Naranja. Poké-Powers, Bebés, Pokémon Oscuros y Brillantes.', key: 'ptcg_kanto_save_v1', cover: 'base1-4' },
+    { id: 'mega', name: 'Era Mega', years: '2025 – 2026', desc: 'Megaevolución y Fuegos Fantasmales con reglas modernas: Pokémon ex y Megaevolución ex, Habilidades, Partidarios y Estadios.', key: 'ptcg_mega_save_v1', cover: megaCover ? megaCover.id : null },
+  ];
+  const grid = el('div', { class: 'eras' });
+  for (const e of ERAS) {
+    const sv = eraSaveInfo(e.key);
+    grid.append(el('button', { class: 'era' + (e.id === ERA ? ' on' : ''), onclick: () => pickEra(e.id) }, e.cover && DB[e.cover] ? cardEl(e.cover) : el('div'), el('div', {}, el('b', { class: 'cond', style: 'font-size:24px;color:var(--gold)' }, e.name), el('div', { class: 'muted', style: 'font-size:13px' }, e.years), el('p', { style: 'font-size:14px;margin:8px 0' }, e.desc), el('div', { class: sv ? 'good' : 'muted', style: 'font-size:13px' }, sv ? `Partida de ${sv.name} · ${(sv.stats || {}).wins || 0} victorias · ${Object.keys(sv.coll || {}).length} cartas distintas` : 'Sin partida todavía'))));
+  }
+  wrap.append(grid, el('div', { class: 'muted', style: 'font-size:12.5px;max-width:640px;text-align:center' }, 'Cada era tiene su propia colección, dinero, mazos y progreso. Puedes cambiar de era cuando quieras desde Opciones.'));
+  t.append(wrap);
+}
+function pickEra(id) {
+  try { localStorage.setItem('ptcg_era', id); sessionStorage.setItem('ptcg_era_ok', '1'); } catch (e) {}
+  if (id !== ERA) { const u = new URL(location.href); u.searchParams.delete('era'); location.replace(u.toString()); return; }
+  S = null; start();
+}
+// ---------- lista de entrenadores (era Mega) ----------
+function viewTrainers(v) {
+  const wrap = el('div', { style: 'max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px' });
+  wrap.append(el('div', { class: 'panel' }, el('h2', { class: 'cond', style: 'color:var(--gold);font-size:24px' }, 'Entrenadores'), el('p', { class: 'muted', style: 'font-size:13.5px;margin-top:4px' }, 'Vence a todos los entrenadores de un nivel para desbloquear el siguiente. Cada nivel trae mazos más fuertes (Pokémon ex y Megaevolución ex) y mejores premios. En la era Mega quien empieza no puede atacar ni jugar Partidarios en su primer turno.')));
+  C.TIERS.forEach((tier, i) => {
+    const open = C.tierOpen(S, i); const n = tier.list.filter(t => S.beaten[t.id]).length;
+    const box = el('div', { class: 'panel tier' + (open ? '' : ' locked') }, el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px' }, el('h3', { class: 'cond', style: 'font-size:20px;color:var(--gold)' }, `${open ? '' : '🔒 '}Nivel ${i + 1} · ${tier.name}`), el('span', { class: n === tier.list.length ? 'good' : 'muted' }, `${n}/${tier.list.length} vencidos`)));
+    if (!open) box.append(el('div', { class: 'bad', style: 'margin:6px 0' }, `Vence a todos los entrenadores de «${C.TIERS[i - 1].name}» para desbloquear este nivel.`));
+    const list = el('div', { class: 'tlist' });
+    for (const t of tier.list) { const row = oppRow({ name: t.name, portrait: t.portrait, level: t.level, types: t.types }, () => open ? preBattle({ kind: 'mega', t }) : toast('Ese nivel todavía está bloqueado.'), S.beaten[t.id] ? `✔ Vencido ×${S.beaten[t.id]}${t.champion ? ' · 👑' : ''}` : `«${t.quote}»`); if (!open) row.querySelector('button.primary').disabled = true; list.append(row); }
+    box.append(list); wrap.append(box);
+  });
+  v.append(wrap);
+}
+function endBattleMega(w) {
+  const spec = BT.spec, t = spec.t; const win = w === 0;
+  const rewards = []; let money = 0; const packs = {};
+  const before = C.curTier(S); const first = !S.beaten[t.id];
+  if (win) {
+    S.stats.wins++; S.beaten[t.id] = (S.beaten[t.id] || 0) + 1;
+    money = first ? 80 * t.level + (t.champion ? 3000 : 0) : 30 * t.level;
+    const sets = C.SETS.filter(s => !setLocked(s)); const st = sets[Math.floor(Math.random() * sets.length)] || C.SETS[0];
+    if (first) packs[st.id] = t.champion ? 5 : t.level >= 4 ? 2 : 1; else if (Math.random() < 0.3) packs[st.id] = 1;
+    if (t.champion && first) rewards.push({ txt: '👑 ¡Eres el nuevo Campeón de la Liga Mega!' });
+    const after = C.curTier(S);
+    if (after > before) { rewards.push({ txt: `¡Nuevo nivel desbloqueado: ${C.TIERS[after].name}!` }); const ns = C.SETS.find(s => s.tier === after); if (ns) rewards.push({ txt: `Nuevo set en la tienda: ${ns.name}` }); }
+    if (first || Math.random() < 0.35) { const locked = []; for (let i = 0; i < COIN_COUNT; i++) if (!S.coins.includes(i)) locked.push(i); if (locked.length) { const c = locked[Math.floor(Math.random() * locked.length)]; S.coins.push(c); rewards.push({ coin: c, txt: '¡Nueva moneda desbloqueada!' }); } }
+  } else { S.stats.losses++; money = 20; }
+  S.money += money; for (const [k, n] of Object.entries(packs)) S.packs[k] = (S.packs[k] || 0) + n;
+  save();
+  const body = el('div', { style: 'display:flex;flex-direction:column;gap:10px;align-items:center;text-align:center;min-width:min(420px,80vw)' });
+  for (const r of rewards) { if (r.coin !== undefined) body.append(el('div', { class: 'coinpick' }, el('div', { class: 'cf', style: coinFace(r.coin, false) }))); body.append(el('div', { style: 'font-weight:700' }, r.txt)); }
+  body.append(el('div', {}, `+ ₽${money}`));
+  const pk = Object.entries(packs); if (pk.length) body.append(el('div', { style: 'display:flex;gap:8px;justify-content:center' }, ...pk.map(([s, n]) => el('div', { style: 'text-align:center' }, el('div', { class: 'pack', style: `background-image:url(assets/pack_${s}_0.webp);width:70px;cursor:default` }), `${n}× ${SETNAME[s]}`))));
+  if (!win) body.append(el('div', { class: 'muted' }, 'Mejora tu mazo con sobres nuevos y vuelve a intentarlo.'));
+  showModal(win ? '¡Victoria!' : 'Derrota', body, [{ t: 'Volver', cls: 'primary', f: () => { BT.g = null; showHub(pk.length ? 'shop' : 'map'); } }]);
+}
 function viewMap(v) {
   const reg = REG(); const sfx = reg.suffix;
   const hub = el('div', { class: 'hub' });
@@ -400,7 +468,7 @@ function viewShop(v) {
     grid.append(el('div', { class: 'set-card' + (locked ? ' locked' : '') },
       el('div', { class: 'box', style: `background-image:url(assets/box_${s.id}.webp)` }),
       el('div', { class: 'body' }, el('div', {}, s.region ? el('span', { class: 'symtxt' }, s.code) : s.id !== 'base1' ? el('img', { class: 'sym', src: `assets/sym_${s.id}.webp`, alt: '' }) : null, ' ', el('b', { class: 'cond', style: 'font-size:19px' }, s.name)),
-        el('div', { class: 'muted', style: 'font-size:13px' }, `Colección: ${owned}/${total} · ${C.PACKS[s.id] ? C.PACKS[s.id].slots.reduce((a, x) => a + x.n, 1) : 11} cartas por sobre, 1 rara garantizada (holo 1 de cada 3)`),
+        el('div', { class: 'muted', style: 'font-size:13px' }, `Colección: ${owned}/${total} · ${C.PACKS[s.id] ? C.PACKS[s.id].slots.reduce((a, x) => a + x.n, 1) : 11} cartas por sobre, ${MEGA ? '1 rara o superior garantizada (ex, ultra raras e ilustraciones)' : '1 rara garantizada (holo 1 de cada 3)'}`),
         locked ? el('div', { class: 'bad' }, setLockMsg(s)) : el('div', { class: 'row' },
           el('button', { class: 'primary', disabled: S.money < s.price ? true : null, onclick: () => buy(s, 1, s.price) }, `Sobre ₽${s.price}`),
           el('button', { disabled: S.money < s.price * 5 ? true : null, onclick: () => buy(s, 5, s.price * 5) }, `5 sobres ₽${s.price * 5}`),
@@ -435,7 +503,7 @@ function revealPack(ov, setId, cards, k, n, fresh) {
       const done = el('button', { class: 'primary', hidden: true, onclick: () => res() }, k < n ? 'Siguiente sobre' : 'Listo');
       const all = el('button', { onclick: () => { fan.querySelectorAll('.flip:not(.up)').forEach(f => f.click()); } }, 'Voltear todas');
       cards.forEach((id, i) => {
-        const d = DB[id]; const f = el('button', { class: 'flip' + (d.rar === 'R' ? ' rare-glow' : '') + (d.rar === 'RH' || d.rar === 'S' ? ' holo-glow' : ''), 'aria-label': 'Voltear carta' }, el('div', { class: 'in' }, el('div', { class: 'face back' }, backEl()), el('div', { class: 'face front' }, cardEl(id))));
+        const d = DB[id]; const f = el('button', { class: 'flip' + (d.rar === 'R' ? ' rare-glow' : '') + (BIGRARE(d.rar) ? ' holo-glow' : ''), 'aria-label': 'Voltear carta' }, el('div', { class: 'in' }, el('div', { class: 'face back' }, backEl()), el('div', { class: 'face front' }, cardEl(id))));
         f.querySelector('.face.back .card').style.setProperty('--cw', '120px');
         if (fresh && fresh.has(id) && cards.indexOf(id) === i) f.querySelector('.face.front .card').append(newTag());
         f.onclick = () => { if (f.classList.contains('up')) return; f.classList.add('up'); up++; if (up === cards.length) { done.hidden = false; all.hidden = true; } };
@@ -449,13 +517,13 @@ function revealPack(ov, setId, cards, k, n, fresh) {
 function bulkReveal(ov, setId, all, n, fresh) {
   return new Promise(res => {
     ov.innerHTML = '';
-    const ord = { RH: 0, S: 0, R: 1, U: 2, C: 3, E: 4 };
+    const ord = { MHR: -3, SIR: -2, UR: -1, IR: 0, RR: 0, RH: 0, S: 0, SH: 0, R: 1, U: 2, C: 3, E: 4 };
     const counts = {}; all.forEach(id => counts[id] = (counts[id] || 0) + 1);
     const ids = Object.keys(counts).sort((a, b) => ord[DB[a].rar] - ord[DB[b].rar] || DB[a].num - DB[b].num);
     const g = el('div', { class: 'grid', style: 'max-width:1100px;width:100%;max-height:62vh;overflow:auto;padding:8px' });
     for (const id of ids) { const c = cardEl(id); c.append(el('span', { class: 'cnt' }, '×' + counts[id])); if (fresh && fresh.has(id)) c.append(newTag()); g.append(c); }
-    const holos = all.filter(id => DB[id].rar === 'RH' || DB[id].rar === 'S').length;
-    ov.append(el('div', { class: 'disp', style: 'color:var(--gold);font-size:22px' }, `${n} sobres de ${SETNAME[setId]}`), el('div', {}, `${all.length} cartas · ${holos} holo · ${all.filter(id => DB[id].rar === 'R').length} raras`), g, el('div', { class: 'opbar' }, el('button', { class: 'primary', onclick: res }, 'Listo')));
+    const holos = all.filter(id => BIGRARE(DB[id].rar)).length;
+    ov.append(el('div', { class: 'disp', style: 'color:var(--gold);font-size:22px' }, `${n} sobres de ${SETNAME[setId]}`), el('div', {}, `${all.length} cartas · ${holos} ${MEGA ? 'ex / especiales' : 'holo'} · ${all.filter(id => DB[id].rar === 'R').length} raras`), g, el('div', { class: 'opbar' }, el('button', { class: 'primary', onclick: res }, 'Listo')));
   });
 }
 
@@ -523,7 +591,7 @@ function viewDecks(v) {
     const need = {}; editDeck.cards.forEach(id => { const d = DB[id]; if (d.st === 'P') d.atk.forEach(a => a.cost.forEach(c => { if (c !== 'C') need[c] = (need[c] || 0) + 1; })); });
     const left = 60 - editDeck.cards.length; if (left <= 0) return;
     const tot = Object.values(need).reduce((a, b) => a + b, 0); const types = Object.keys(need); if (!types.length) types.push('F');
-    let placed = 0; types.forEach((t, i) => { const n = i === types.length - 1 ? left - placed : Math.round(left * need[t] / tot); for (let k = 0; k < n; k++) editDeck.cards.push(P.Decks.ENERGY_ID[t]); placed += n; });
+    let placed = 0; types.forEach((t, i) => { const n = i === types.length - 1 ? left - placed : Math.round(left * need[t] / tot); for (let k = 0; k < n; k++) if (ENERGY_ID[t]) editDeck.cards.push(ENERGY_ID[t]); placed += n; });
     drawAll();
   };
   const drawAll = () => { drawGrid(); drawList(); if (BT.deckTabLabel) BT.deckTabLabel(); };
@@ -555,7 +623,7 @@ function viewOpts(v) {
     el('div', { class: 'muted', style: 'font-size:13px' }, 'Versión del juego: ', el('b', { style: 'color:var(--gold)' }, APP_VERSION)),
     !window.claude ? el('div', {}, el('button', { onclick: forceUpdate }, '🔄 Buscar actualización')) : null,
     el('div', { class: 'muted', style: 'font-size:13px' }, dbRef ? 'Tu progreso se guarda automáticamente en tu cuenta y en este navegador.' : 'Tu progreso se guarda en este navegador. Usa "Exportar" para tener una copia de seguridad.'),
-    el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, el('button', { onclick: exportSave }, 'Exportar partida'), el('button', { onclick: importSave }, 'Importar partida'), el('button', { class: 'danger', onclick: () => showModal('¿Empezar de cero?', el('p', {}, 'Se borrará tu colección, mazos y medallas.'), [{ t: 'Cancelar' }, { t: 'Borrar todo', cls: 'danger', f: () => { S = null; try { localStorage.removeItem(SAVE_KEY); } catch (e) {} if (dbRef) dbRef.set({ json: JSON.stringify(defaultSave()), updated: Date.now() }).catch(() => {}); showTitle(); } }]) }, 'Nueva partida'))));
+    el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, el('button', { onclick: showEraPick }, '⇄ Cambiar de era'), el('button', { onclick: exportSave }, 'Exportar partida'), el('button', { onclick: importSave }, 'Importar partida'), el('button', { class: 'danger', onclick: () => showModal('¿Empezar de cero?', el('p', {}, MEGA ? 'Se borrará tu partida de la era Mega (la de la era WOTC no se toca).' : 'Se borrará tu colección, mazos y medallas.'), [{ t: 'Cancelar' }, { t: 'Borrar todo', cls: 'danger', f: () => { S = null; try { localStorage.removeItem(SAVE_KEY); } catch (e) {} if (dbRef) dbRef.set({ json: JSON.stringify(defaultSave()), updated: Date.now() }).catch(() => {}); showTitle(); } }]) }, 'Nueva partida'))));
 }
 
 // ================= MODALES =================
@@ -575,7 +643,8 @@ function preBattle(spec) {
   const errs = deck ? P.Decks.validate(deck.cards) : ['No tienes mazo'];
   let opp;
   const rng = Math.random;
-  if (spec.kind === 'route') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: spec.t.rival && spec.t.region === 'johto' ? C.silverDeck(spec.t, rng) : C.trainerDeck(spec.t, rng), key: spec.t.id, perk: spec.t.perk };
+  if (spec.kind === 'mega') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: spec.t.id };
+  else if (spec.kind === 'route') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: spec.t.rival && spec.t.region === 'johto' ? C.silverDeck(spec.t, rng) : C.trainerDeck(spec.t, rng), key: spec.t.id, perk: spec.t.perk };
   else if (spec.kind === 'elite') opp = { name: spec.t.name, portrait: spec.t.portrait, level: 5, deck: C.eliteDeck(spec.t, rng), perk: spec.t.perk, key: spec.t.id };
   else if (spec.kind === 'gymTrainer') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: 'g_' + spec.gym.id + '_' + spec.idx };
   else if (spec.kind === 'leader') opp = { name: 'Líder ' + spec.gym.leader, portrait: spec.gym.portrait, level: spec.gym.level, deck: C.leaderDeck(spec.gym, rng), perk: spec.gym.perk, key: 'L_' + spec.gym.id };
@@ -589,7 +658,7 @@ function preBattle(spec) {
   info.append(el('div', {}, el('b', { style: 'font-size:18px' }, opp.name), ' ', el('span', { class: 'lv' }, 'Nivel ' + opp.level)));
   const types = {}; opp.deck.forEach(id => (DB[id].types || []).forEach(t => types[t] = (types[t] || 0) + 1));
   info.append(el('div', {}, 'Mazo: ', ...Object.keys(types).sort((a, b) => types[b] - types[a]).slice(0, 3).map(eIcon)));
-  if (opp.perk) info.append(el('div', { class: 'pw', style: 'background:#2a1f3d;border-left:3px solid var(--gold);padding:8px;border-radius:6px' }, el('b', {}, 'Ventaja: ' + C.PERKS[opp.perk].name), el('div', { style: 'font-size:13px' }, C.PERKS[opp.perk].es)));
+  if (opp.perk && C.PERKS[opp.perk]) info.append(el('div', { class: 'pw', style: 'background:#2a1f3d;border-left:3px solid var(--gold);padding:8px;border-radius:6px' }, el('b', {}, 'Ventaja: ' + C.PERKS[opp.perk].name), el('div', { style: 'font-size:13px' }, C.PERKS[opp.perk].es)));
   const sel = el('select', { 'aria-label': 'Tu mazo', onchange: () => { S.activeDeck = +sel.value; save(); } }, ...S.decks.map((d, i) => el('option', { value: i, selected: i === S.activeDeck ? true : null }, d.name + (P.Decks.validate(d.cards).length ? ' (no válido)' : ''))));
   info.append(el('label', {}, 'Tu mazo: ', sel));
   if (errs.length) info.append(el('div', { class: 'bad' }, errs[0]));
@@ -606,11 +675,11 @@ function startBattle(spec, myDeck) {
   $('#battle').hidden = false; $('#log').innerHTML = '';
   BT.spec = spec; BT.sel = null; BT.ask = null; BT.me = 0; BT.online = false;
   const opp = spec.opp;
-  const aiLvl = Math.min(3, Math.max(1, Math.ceil(opp.level / 2) + (spec.kind === 'leader' || spec.kind === 'league' || (spec.t && (spec.t.boss || spec.t.rival)) ? 1 : 0)));
-  const g = new P.Game({ ai: P.AI, players: [{ name: S.name, deck: myDeck.slice(), coin: S.coin }, { name: opp.name, deck: opp.deck, ai: { level: aiLvl }, perk: opp.perk, coin: Math.floor(Math.random() * COIN_COUNT) }], io: IO });
+  const aiLvl = MEGA ? Math.min(3, Math.max(1, Math.ceil(opp.level / 2) + (opp.level >= 4 ? 1 : 0))) : Math.min(3, Math.max(1, Math.ceil(opp.level / 2) + (spec.kind === 'leader' || spec.kind === 'league' || (spec.t && (spec.t.boss || spec.t.rival)) ? 1 : 0)));
+  const g = new P.Game({ modern: MEGA, ai: P.AI, players: [{ name: S.name, deck: myDeck.slice(), coin: S.coin }, { name: opp.name, deck: opp.deck, ai: { level: aiLvl }, perk: opp.perk, coin: Math.floor(Math.random() * COIN_COUNT) }], io: IO });
   g.portrait = opp.portrait;
   BT.g = g; render();
-  g.run().then(w => endBattle(w)).catch(e => { console.error(e); toast('Error en la partida: ' + e.message, 5000); });
+  g.run().then(w => MEGA ? endBattleMega(w) : endBattle(w)).catch(e => { console.error(e); toast('Error en la partida: ' + e.message, 5000); });
 }
 const IO = {
   log(g, m) { const L = $('#log'); const d = el('div', { class: m.startsWith('—') ? 't' : m.startsWith('💥') ? 'ko' : m.startsWith('🏆') ? 'win' : '' }, m); L.append(d); L.scrollTop = L.scrollHeight; },
@@ -782,7 +851,7 @@ function slotClick(ev, s, owner) {
 }
 function benchItems(g, p, s) {
   const items = []; const d = g.baseDef(s);
-  if (d.pw && P.FX.pw[d.pw.name] && P.FX.pw[d.pw.name].use) items.push({ t: 'Poder: ' + d.pw.nameEs, disabled: !g.powerUsable(p, s), why: g.powerUsable(p, s) ? '' : 'no disponible', f: () => act(A('usePower', p, s)) });
+  if (d.pw && P.FX.pw[d.pw.name] && P.FX.pw[d.pw.name].use) items.push({ t: (d.pw.ability ? 'Habilidad: ' : 'Poder: ') + d.pw.nameEs, disabled: !g.powerUsable(p, s), why: g.powerUsable(p, s) ? '' : 'no disponible', f: () => act(A('usePower', p, s)) });
   if (g.eff(s).trainerMon) items.push({ t: 'Descartar ' + g.nm(s), f: () => act(A('discardTrainerMon', p, s)) });
   if (s.att.some(c => g.isEvoCard(c))) items.push({ t: 'Descartar forma de Metamorfosis', f: () => act(A('discardShapeshift', p, s)) });
   return items;
@@ -1013,7 +1082,7 @@ async function netOpen(code, role) {
   NET.link = tr; NET.kind = tr.kind; NET.lastRx = Date.now();
   NET.rel = mkReliable(m => tr.send(m), netOnMsg);
   NET.status = role === 'host' ? 'Sala creada. Comparte el código con tu amigo y espera a que se una.' : 'Conectando con el anfitrión…';
-  netSend('hello', { name: S.name, v: APP_VERSION });
+  netSend('hello', { name: S.name, v: APP_VERSION, era: ERA });
   refreshOnline();
 }
 function netClose(silent) {
@@ -1055,7 +1124,7 @@ async function remoteTurn(g, p) {
 }
 function desync() { if (!BT.online) return; toast('La partida se desincronizó: se cancela sin resultado.', 5000); finishOnline(null, 'desincronización'); }
 // --- combate ---
-function validRemoteDeck(d) { return Array.isArray(d) && d.length === 60 && d.every(id => typeof id === 'string' && DB[id]) && !P.Decks.validate(d).length; }
+function validRemoteDeck(d) { return Array.isArray(d) && d.length === 60 && d.every(id => typeof id === 'string' && DB[id] && (DB[id].era === 'mega') === MEGA) && !P.Decks.validate(d).length; }
 function challenge() {
   const d = S.decks[S.activeDeck]; if (!d || P.Decks.validate(d.cards).length) return toast('Tu mazo activo no es válido: revísalo en "Mazos".');
   gReset(); const seed = Math.floor(Math.random() * 2 ** 31);
@@ -1079,7 +1148,7 @@ function startOnline(o) {
   $('#battle').hidden = false; $('#log').innerHTML = ''; const cw = $('#claimwin'); if (cw) cw.remove();
   BT.spec = { kind: 'online', opp: { name: o.names[1 - o.me], portrait: 'base1-88' } }; BT.sel = null; BT.ask = null; BT.me = o.me; BT.online = true; BT.resolveTurn = null; BT.busy = false;
   const gen = NET.gen;
-  const g = new P.Game({ rng: P.mkRng(o.seed), uidBase: 1, ai: P.AI, players: [0, 1].map(i => ({ name: o.names[i], deck: o.decks[i].slice(), coin: Math.min(COIN_COUNT - 1, Math.max(0, o.coins[i] | 0)) })), io: IO });
+  const g = new P.Game({ modern: MEGA, rng: P.mkRng(o.seed), uidBase: 1, ai: P.AI, players: [0, 1].map(i => ({ name: o.names[i], deck: o.decks[i].slice(), coin: Math.min(COIN_COUNT - 1, Math.max(0, o.coins[i] | 0)) })), io: IO });
   g.p[1 - o.me].remote = true; g.portrait = 'base1-88';
   BT.g = g; render();
   g.run().then(w => { if (BT.g === g && NET.gen === gen) finishOnline(w); }).catch(e => { if (!(e instanceof P.GameOver)) { console.error(e); toast('Error en la partida: ' + e.message, 5000); } });
@@ -1142,12 +1211,13 @@ function tradePanel() {
 }
 function onOffer(d) {
   if (!NET.trade) openTrade(true);
-  const ids = Array.isArray(d.cards) ? d.cards.filter(id => typeof id === 'string' && DB[id] && !(DB[id].st === 'E' && DB[id].basic)).slice(0, 30) : [];
+  const ids = Array.isArray(d.cards) ? d.cards.filter(id => typeof id === 'string' && DB[id] && (DB[id].era === 'mega') === MEGA && !(DB[id].st === 'E' && DB[id].basic)).slice(0, 30) : [];
   const T = NET.trade; T.theirs = ids; T.myAcc = null; T.theirAcc = null; if (T.ui && curView === 'online') T.ui(); else refreshOnline();
 }
 function netOnMsg(t, d) {
   d = d || {};
-  if (t === 'hello') { const first = !NET.peer; NET.peer = String(d.name || 'Rival').slice(0, 24) || 'Rival'; NET.status = 'Conectado'; if (first) { toast(`Conectado con ${NET.peer}`); netSend('hello2', { name: S.name }); } if (d.v && d.v !== APP_VERSION) toast('Aviso: tu amigo usa otra versión del juego (' + d.v + '). Actualicen ambos para evitar errores.', 5000); refreshOnline(); return; }
+  if ((t === 'hello' || t === 'hello2') && d.era && d.era !== ERA) toast(`Tu amigo está jugando la era ${d.era === 'mega' ? 'Mega' : 'WOTC'}: deben estar en la misma era para combatir o intercambiar.`, 6000);
+  if (t === 'hello') { const first = !NET.peer; NET.peer = String(d.name || 'Rival').slice(0, 24) || 'Rival'; NET.status = 'Conectado'; if (first) { toast(`Conectado con ${NET.peer}`); netSend('hello2', { name: S.name, era: ERA }); } if (d.v && d.v !== APP_VERSION) toast('Aviso: tu amigo usa otra versión del juego (' + d.v + '). Actualicen ambos para evitar errores.', 5000); refreshOnline(); return; }
   if (t === 'hello2') { if (!NET.peer) { NET.peer = String(d.name || 'Rival').slice(0, 24); NET.status = 'Conectado'; toast(`Conectado con ${NET.peer}`); refreshOnline(); } return; }
   if (t === 'g') { if (BT.online) gPush(d); return; }
   if (t === 'duelReq') return onDuelReq(d);
@@ -1236,6 +1306,8 @@ document.addEventListener('click', ev => { if (ev.target.id === 'logclose') $('#
 window.addEventListener('resize', () => { if (BT.g && !$('#battle').hidden) render(); });
 // ================= ARRANQUE =================
 const start = () => {
+  let picked = false; try { picked = sessionStorage.getItem('ptcg_era_ok') === '1'; } catch (e) { picked = true; }
+  if (!picked && !new URLSearchParams(location.search).get('era') && !new URLSearchParams(location.search).get('net')) return showEraPick();
   const ls = lsGet();
   if (ls && ls.name) { S = Object.assign(defaultSave(), ls); showHub(); } else showTitle();
   initCloud();
