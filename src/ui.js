@@ -15,7 +15,7 @@ if (MEGA) { try { document.querySelector('#topbar .brand').textContent = 'LIGA M
 const ENERGY_BASIC = MEGA ? C.ENERGY_BASIC : ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const ENERGY_ID = MEGA ? C.ENERGY_ID : P.Decks.ENERGY_ID;
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v14 · Era Mega: Héroes Ascendentes, Equilibrio Perfecto y Oscuridad Absoluta';
+const APP_VERSION = 'v15 · Modos «Abrir sobres» y «Todas las cartas» con mazos meta';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}
@@ -26,10 +26,14 @@ async function forceUpdate() {
 // ---------- guardado ----------
 const SAVE_KEY = MEGA ? 'ptcg_mega_save_v1' : 'ptcg_kanto_save_v1';
 let S = null; let dbRef = null; let saveTimer = null;
+// modos: campaña, sólo abrir sobres, todas las cartas (cada uno con su propio guardado)
+let MODE = 'camp'; try { MODE = sessionStorage.getItem('ptcg_mode_' + ERA) || 'camp'; } catch (e) {}
+const MODES = { camp: 'Campaña', packs: 'Abrir sobres', free: 'Todas las cartas' };
+const skey = (m = MODE) => SAVE_KEY + (m === 'camp' ? '' : '_' + m);
 function defaultSave() { return { v: 1, name: '', money: 0, coll: {}, packs: {}, decks: [], activeDeck: 0, badges: [], badgesJ: [], badgesO: [], region: 'kanto', championJ: false, championO: false, beaten: {}, coins: [0, 2, 4, 6], coin: 0, stats: { wins: 0, losses: 0 }, opts: { speed: 1 }, champion: false, created: Date.now(), updated: 0 }; }
-function lsGet() { try { const t = localStorage.getItem(SAVE_KEY); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
-function lsSet(s) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) {} }
-function save() { if (!S) return; S.updated = Date.now(); lsSet(S); clearTimeout(saveTimer); saveTimer = setTimeout(async () => { if (dbRef) { try { await dbRef.set({ json: JSON.stringify(S), updated: S.updated }); } catch (e) {} } }, 800); }
+function lsGet(m) { try { const t = localStorage.getItem(skey(m)); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
+function lsSet(s) { try { localStorage.setItem(skey(), JSON.stringify(s)); } catch (e) {} }
+function save() { if (!S) return; S.updated = Date.now(); lsSet(S); clearTimeout(saveTimer); saveTimer = setTimeout(async () => { if (dbRef && MODE === 'camp') { try { await dbRef.set({ json: JSON.stringify(S), updated: S.updated }); } catch (e) {} } }, 800); }
 async function initCloud() {
   try {
     if (!window.claude || !window.claude.use) return;
@@ -38,8 +42,8 @@ async function initCloud() {
     const id = await user.id(); if (!id) return;
     dbRef = db.doc('data/users/' + id + (MEGA ? '/save_mega' : '/save'));
     const snap = await dbRef.get();
-    if (snap.exists) { const d = snap.data(); const remote = JSON.parse(d.json); if (!S || (remote.updated || 0) > (S.updated || 0)) { S = Object.assign(defaultSave(), remote); lsSet(S); if (S.name) showHub(); toast('Partida recuperada de la nube'); } }
-    else if (S && S.name) save();
+    if (snap.exists) { if (MODE !== 'camp') return; const d = snap.data(); const remote = JSON.parse(d.json); if (!S || (remote.updated || 0) > (S.updated || 0)) { S = Object.assign(defaultSave(), remote); lsSet(S); if (S.name) showHub(); toast('Partida recuperada de la nube'); } }
+    else if (S && S.name && MODE === 'camp') save();
   } catch (e) {}
 }
 
@@ -115,7 +119,7 @@ const REG = () => C.REGIONS[C.REGIONS[S.region] && regionOpen(S.region) ? S.regi
 const regionOf = x => C.REGIONS[x && C.REGIONS[x.region] ? x.region : 'kanto'];
 const badgesOf = r => S[r.badgesKey] || (S[r.badgesKey] = []);
 const hasBadge = g => badgesOf(regionOf(g)).includes(g.id);
-const setLocked = s => { if (MEGA) return C.curTier(S) < s.tier; const r = C.REGIONS[s.region || 'kanto']; return !regionOpen(r.id) || badgesOf(r).length < s.unlock; };
+const setLocked = s => { if (MODE !== 'camp') return false; if (MEGA) return C.curTier(S) < s.tier; const r = C.REGIONS[s.region || 'kanto']; return !regionOpen(r.id) || badgesOf(r).length < s.unlock; };
 const setLockMsg = s => { if (MEGA) return `🔒 Se desbloquea al llegar al nivel ${s.tier + 1} (${C.TIERS[s.tier].name})`; const r = C.REGIONS[s.region || 'kanto']; return !regionOpen(r.id) ? '🔒 ' + r.lockMsg : `🔒 Se desbloquea con ${s.unlock} medalla(s)${r.suffix}`; };
 function coinFace(i, tails) { const c = 2 * (i % 16) + (tails ? 1 : 0), r = Math.floor(i / 16); return `background-position:${c * 100 / 31}% ${r * 100 / 9}%`; }
 const COIN_COUNT = 152;
@@ -212,6 +216,7 @@ function showTitle() {
       lsGet() && lsGet().name ? el('button', { onclick: () => { S = Object.assign(defaultSave(), lsGet()); showHub(); } }, 'Continuar partida guardada') : null,
       el('button', { onclick: importSave }, 'Importar partida'),
       el('button', { class: 'primary', onclick: () => newGame(nameIn.value.trim() || 'Rojo', pick) }, '¡Comenzar aventura!'))));
+  wrap.append(modePanel(() => nameIn.value.trim() || 'Rojo'));
   t.append(wrap);
 }
 function newGame(name, starterIdx) {
@@ -239,19 +244,24 @@ async function exportSave() {
 
 // ================= HUB =================
 let curView = 'map';
-const NAV = [['map', MEGA ? 'Entrenadores' : 'Mapa'], ['shop', 'Tienda'], ['coll', 'Colección'], ['decks', 'Mazos'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']];
+const NAV_CAMP = [['map', MEGA ? 'Entrenadores' : 'Mapa'], ['shop', 'Tienda'], ['coll', 'Colección'], ['decks', 'Mazos'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']];
+const NAV_MODE = { camp: NAV_CAMP, packs: [['shop', 'Abrir sobres'], ['coll', 'Colección'], ['opts', 'Opciones']], free: [['meta', 'Mazos meta'], ['decks', 'Mazos'], ['coll', 'Colección'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']] };
+const DEF_VIEW = { camp: 'map', packs: 'shop', free: 'meta' };
 function showHub(view) {
   for (const s of document.querySelectorAll('.screen')) s.hidden = true;
   $('#hubscreen').hidden = false; if (view) curView = view; renderTop(); renderView();
 }
 function renderTop() {
   const nav = $('#nav'); nav.innerHTML = '';
+  const NAV = NAV_MODE[MODE]; if (!NAV.some(n => n[0] === curView)) curView = DEF_VIEW[MODE];
   for (const [k, l] of NAV) nav.append(el('button', { class: curView === k ? 'on' : '', onclick: () => { curView = k; renderTop(); renderView(); } }, l + (k === 'shop' && packCount() ? ` (${packCount()})` : '') + (k === 'coll' && newCount() ? ` ★${newCount()}` : '') + (k === 'online' && NET.link ? ' ●' : '')));
-  const b = $('#badges'); b.innerHTML = ''; if (MEGA) { const k = C.curTier(S); b.append(el('span', { class: 'cond', style: 'color:var(--gold);font-size:15px' }, `Nivel ${k + 1}: ${C.TIERS[k].name}`, el('span', { class: 'muted', style: 'font-size:12px' }, ` · ${C.TRAINERS.filter(t => S.beaten[t.id]).length}/${C.TRAINERS.length} vencidos`))); } else for (const g of REG().GYMS) b.append(badgeEl(g.badge, !hasBadge(g)));
+  const b = $('#badges'); b.innerHTML = '';
+  if (MODE !== 'camp') { b.append(el('span', { class: 'cond', style: 'color:var(--gold);font-size:15px' }, MODE === 'packs' ? '🎴 Modo Abrir sobres' : '🗂️ Modo Todas las cartas', el('span', { class: 'muted', style: 'font-size:12px' }, MODE === 'packs' ? ` · ${(S.stats.opened || 0).toLocaleString('es-CL')} sobres abiertos` : ` · ${Object.values(S.metaRec || {}).reduce((a, r) => a + r.w, 0)} victorias contra mazos meta`))); $('#money').textContent = MODE === 'packs' ? `${P.CARDS.filter(d => S.coll[d.id]).length}/${P.CARDS.length}` : '₽ ∞'; return; }
+  if (MEGA) { const k = C.curTier(S); b.append(el('span', { class: 'cond', style: 'color:var(--gold);font-size:15px' }, `Nivel ${k + 1}: ${C.TIERS[k].name}`, el('span', { class: 'muted', style: 'font-size:12px' }, ` · ${C.TRAINERS.filter(t => S.beaten[t.id]).length}/${C.TRAINERS.length} vencidos`))); } else for (const g of REG().GYMS) b.append(badgeEl(g.badge, !hasBadge(g)));
   $('#money').textContent = `₽ ${S.money.toLocaleString('es-CL')}`;
 }
 const packCount = () => Object.values(S.packs).reduce((a, b) => a + b, 0);
-function renderView() { const v = $('#view'); v.innerHTML = ''; ({ map: MEGA ? viewTrainers : viewMap, shop: viewShop, coll: viewColl, decks: viewDecks, online: viewOnline, coins: viewCoins, opts: viewOpts })[curView](v); }
+function renderView() { const v = $('#view'); v.innerHTML = ''; ({ meta: viewMeta, map: MEGA ? viewTrainers : viewMap, shop: MODE === 'packs' ? viewPackShop : viewShop, coll: viewColl, decks: viewDecks, online: viewOnline, coins: viewCoins, opts: viewOpts })[curView](v); }
 
 // ---------- mapa ----------
 const LAND = {
@@ -304,6 +314,104 @@ function pickEra(id) {
   try { localStorage.setItem('ptcg_era', id); sessionStorage.setItem('ptcg_era_ok', '1'); } catch (e) {}
   if (id !== ERA) { const u = new URL(location.href); u.searchParams.delete('era'); location.replace(u.toString()); return; }
   S = null; start();
+}
+// ---------- modos: Abrir sobres / Todas las cartas ----------
+function modeInfo(m) { const d = lsGet(m); if (!d || !d.name) return 'Sin empezar'; if (m === 'packs') return `${(d.stats && d.stats.opened) || 0} sobres abiertos · ${P.CARDS.filter(c => d.coll[c.id]).length}/${P.CARDS.length} cartas`; return `${Object.values(d.metaRec || {}).reduce((a, r) => a + r.w, 0)} victorias contra mazos meta`; }
+function modePanel(nameFn) {
+  const box = el('div', { class: 'panel', style: 'display:flex;flex-direction:column;gap:10px;width:min(900px,100%)' }, el('h2', { class: 'cond', style: 'color:var(--gold)' }, 'Otros modos'), el('div', { class: 'muted', style: 'font-size:13px' }, 'Cada modo tiene su propio guardado: no toca tu campaña.'));
+  const grid = el('div', { class: 'modes' });
+  for (const [m, ic, desc] of [['packs', '🎴', 'Abre todos los sobres que quieras, sin gastar dinero, sólo para completar la colección.'], ['free', '🗂️', 'Colección completa (4 copias de cada carta): arma cualquier mazo y enfréntate a los mazos meta del formato.']])
+    grid.append(el('button', { class: 'modebtn', onclick: () => enterMode(m, nameFn()) }, el('div', { style: 'font-size:30px' }, ic), el('div', {}, el('b', { class: 'cond', style: 'font-size:19px;color:var(--gold)' }, MODES[m]), el('div', { style: 'font-size:13px;margin:4px 0' }, desc), el('div', { class: 'muted', style: 'font-size:12px' }, modeInfo(m)))));
+  box.append(grid); return box;
+}
+function modeSwitchRow() {
+  const row = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, el('span', { class: 'muted', style: 'font-size:13px' }, `Modo actual: ${MODES[MODE]} ·`));
+  for (const m of Object.keys(MODES)) if (m !== MODE) row.append(el('button', { onclick: () => switchMode(m) }, (m === 'camp' ? '🏆 ' : m === 'packs' ? '🎴 ' : '🗂️ ') + MODES[m]));
+  return row;
+}
+function switchMode(m) {
+  if (m !== 'camp') return enterMode(m, (S && S.name) || 'Entrenador');
+  MODE = 'camp'; try { sessionStorage.setItem('ptcg_mode_' + ERA, 'camp'); } catch (e) {}
+  const ls = lsGet(); if (ls && ls.name) { S = Object.assign(defaultSave(), ls); showHub(DEF_VIEW.camp); } else { S = null; showTitle(); }
+}
+function enterMode(m, name) {
+  MODE = m; try { sessionStorage.setItem('ptcg_mode_' + ERA, m); } catch (e) {}
+  const ls = lsGet();
+  if (ls && ls.name) S = Object.assign(defaultSave(), ls);
+  else {
+    S = defaultSave(); S.name = name || 'Entrenador'; S.mode = m; S.stats.opened = 0;
+    if (m === 'free') { S.coins = Array.from({ length: COIN_COUNT }, (_, i) => i); S.metaRec = {}; const md = P.metaDecks(ERA); S.decks = md.slice(0, 1).map(d => ({ name: d.name + ' (meta)', cards: d.cards.slice() })); }
+  }
+  if (m === 'free') { for (const d of P.CARDS) if (!ENERGY_BASIC.includes(d.id) && !(d.st === 'E' && d.basic)) S.coll[d.id] = 4; S.newCards = {}; }
+  save(); editDeck = null; editIdx = 0; showHub(DEF_VIEW[m]);
+  if (!ls || !ls.name) toast(m === 'packs' ? 'Modo Abrir sobres: elige un set y abre los sobres que quieras.' : 'Modo Todas las cartas: tienes 4 copias de cada carta. ¡Desafía a los mazos meta!', 3500);
+}
+function openFree(id, n) { S.packs[id] = (S.packs[id] || 0) + n; S.stats.opened = (S.stats.opened || 0) + n; save(); openPacks(id, n); }
+function viewPackShop(v) {
+  const wrap = el('div', { style: 'max-width:1340px;margin:0 auto;display:flex;flex-direction:column;gap:16px' });
+  const own = P.CARDS.filter(d => S.coll[d.id]).length; const big = P.CARDS.filter(d => S.coll[d.id] && BIGRARE(d.rar)).length;
+  wrap.append(el('div', { class: 'panel' }, el('h2', { class: 'cond', style: 'color:var(--gold);font-size:24px' }, 'Abrir sobres'),
+    el('p', { class: 'muted', style: 'font-size:13.5px;margin:4px 0 8px' }, 'Elige un set y abre todos los sobres que quieras. No cuesta dinero y no hay combates: lo que salga va a la colección de este modo.'),
+    el('div', { style: 'display:flex;gap:18px;flex-wrap:wrap;font-size:14px' }, el('span', {}, '🎴 ', el('b', {}, (S.stats.opened || 0).toLocaleString('es-CL')), ' sobres abiertos'), el('span', {}, '📚 ', el('b', {}, `${own}/${P.CARDS.length}`), ` cartas distintas (${Math.round(own * 100 / P.CARDS.length)}%)`), el('span', {}, '✨ ', el('b', {}, big), ' cartas raras especiales distintas'))));
+  const grid = el('div', { class: 'shop-grid' });
+  for (const s of C.SETS) {
+    const ownS = P.CARDS.filter(d => d.set === s.id && S.coll[d.id]).length; const total = P.CARDS.filter(d => d.set === s.id).length;
+    grid.append(el('div', { class: 'set-card' },
+      el('div', { class: 'box', style: `background-image:url(assets/box_${s.id}.webp)` }),
+      el('div', { class: 'body' }, el('div', {}, s.region || MEGA ? el('span', { class: 'symtxt' }, s.code || '') : s.id !== 'base1' ? el('img', { class: 'sym', src: `assets/sym_${s.id}.webp`, alt: '' }) : null, ' ', el('b', { class: 'cond', style: 'font-size:19px' }, s.name)),
+        el('div', { class: 'muted', style: 'font-size:13px' }, `Colección: ${ownS}/${total} (${Math.round(ownS * 100 / Math.max(1, total))}%)`),
+        el('div', { class: 'meter' }, el('i', { style: `width:${Math.round(ownS * 100 / Math.max(1, total))}%` })),
+        el('div', { class: 'row' },
+          el('button', { class: 'primary', onclick: () => openFree(s.id, 1) }, 'Abrir 1'),
+          el('button', { onclick: () => openFree(s.id, 10) }, 'Abrir 10'),
+          el('button', { onclick: () => openFree(s.id, 36) }, 'Caja (36)')))));
+  }
+  wrap.append(grid); v.append(wrap);
+}
+function copyMeta(d) { S.decks.push({ name: d.name + ' (meta)', cards: d.cards.slice() }); S.activeDeck = S.decks.length - 1; editIdx = S.activeDeck; editDeck = null; save(); toast(`«${d.name}» copiado a tus mazos y seleccionado ★`); }
+function showDeckList(d) {
+  const counts = {}; d.cards.forEach(id => counts[id] = (counts[id] || 0) + 1);
+  const body = el('div', { style: 'min-width:min(460px,80vw);max-height:60vh;overflow:auto' });
+  for (const [k, lab] of [['P', 'Pokémon'], ['T', 'Entrenadores'], ['E', 'Energía']]) {
+    const ids = Object.keys(counts).filter(id => DB[id].st === k); const n = ids.reduce((a, id) => a + counts[id], 0); if (!n) continue;
+    body.append(el('div', { class: 'cond', style: 'font-size:16px;color:var(--gold);margin-top:6px' }, `${lab} (${n})`));
+    for (const id of ids) body.append(el('div', { class: 'dl-row', 'data-card': id }, el('span', { class: 'q' }, counts[id]), el('span', { class: 'nm' }, DB[id].nameEs, el('span', { class: 'muted', style: 'font-size:11px' }, ` ${SETNAME[DB[id].set] || ''}`))));
+  }
+  showModal(d.name, body, [{ t: 'Cerrar' }, { t: 'Copiar a mis mazos', cls: 'primary', f: () => copyMeta(d) }]);
+}
+function viewMeta(v) {
+  const L = P.metaDecks ? P.metaDecks(ERA) : []; S.metaRec = S.metaRec || {};
+  const wrap = el('div', { style: 'max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px' });
+  wrap.append(el('div', { class: 'panel' }, el('h2', { class: 'cond', style: 'color:var(--gold);font-size:24px' }, 'Mazos meta'),
+    el('p', { class: 'muted', style: 'font-size:13.5px;margin-top:4px' }, MEGA ? 'Listas reales de Limitless TCG (Regional Puebla, 24 de octubre de 2026), adaptadas a las 5 expansiones del juego. Si una carta no existe aquí se cambia por la más parecida; cada mazo indica sus cambios.' : 'Los arquetipos más famosos de la era WOTC (1999-2001), según Bulbapedia y las listas de la época.'),
+    el('p', { class: 'muted', style: 'font-size:13.5px' }, 'La IA juega en su dificultad máxima. Con «Copiar a mis mazos» puedes jugarlos tú o modificarlos en «Mazos».')));
+  for (const d of L) {
+    const r = S.metaRec[d.id] || { w: 0, l: 0 };
+    const types = {}; d.cards.forEach(id => (DB[id].types || []).forEach(t => types[t] = (types[t] || 0) + 1));
+    const cov = el('div', { style: 'width:120px;flex:none' }, cardEl(d.cover));
+    const info = el('div', { style: 'flex:1;min-width:240px;display:flex;flex-direction:column;gap:6px' },
+      el('div', {}, el('b', { class: 'cond', style: 'font-size:21px' }, d.name), ' ', ...Object.keys(types).sort((a, b) => types[b] - types[a]).slice(0, 3).map(eIcon)),
+      el('div', { class: 'muted', style: 'font-size:13px' }, `${d.place} · ${d.by}`),
+      el('div', { style: 'font-size:14px' }, d.desc),
+      d.subs && d.subs.length ? el('details', { style: 'font-size:13px' }, el('summary', { style: 'cursor:pointer' }, `Cambios respecto a la lista original (${d.subs.length})`), el('ul', { style: 'margin:4px 0 0 18px' }, ...d.subs.map(x => el('li', {}, x)))) : null,
+      el('div', { style: 'font-size:13px' }, r.w + r.l ? el('span', { class: r.w >= r.l ? 'good' : 'bad' }, `Tú contra este mazo: ${r.w} V – ${r.l} D`) : el('span', { class: 'muted' }, 'Aún no lo enfrentas'), ' · ', el('a', { href: d.src, target: '_blank', rel: 'noopener', style: 'color:var(--gold)' }, 'Fuente')),
+      el('div', { class: 'row', style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:4px' },
+        el('button', { class: 'primary', onclick: () => preBattle({ kind: 'meta', d }) }, '⚔️ Enfrentar'),
+        el('button', { onclick: () => showDeckList(d) }, 'Ver lista'),
+        el('button', { onclick: () => copyMeta(d) }, 'Copiar a mis mazos')));
+    wrap.append(el('div', { class: 'panel', style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start' }, cov, info));
+  }
+  v.append(wrap);
+}
+function endBattleMeta(w) {
+  const spec = BT.spec, d = spec.d; const win = w === 0;
+  S.metaRec = S.metaRec || {}; const r = S.metaRec[d.id] = S.metaRec[d.id] || { w: 0, l: 0 };
+  if (win) { r.w++; S.stats.wins++; } else { r.l++; S.stats.losses++; }
+  save();
+  const body = el('div', { style: 'display:flex;flex-direction:column;gap:10px;align-items:center;text-align:center;min-width:min(420px,80vw)' },
+    el('div', { style: 'font-weight:700' }, win ? `¡Venciste a ${d.name}!` : `${d.name} te ganó esta vez.`),
+    el('div', {}, `Tu récord contra este mazo: ${r.w} V – ${r.l} D`));
+  showModal(win ? '¡Victoria!' : 'Derrota', body, [{ t: 'Volver', f: () => { BT.g = null; showHub('meta'); } }, { t: 'Revancha', cls: 'primary', f: () => { BT.g = null; showHub('meta'); preBattle({ kind: 'meta', d }); } }]);
 }
 // ---------- lista de entrenadores (era Mega) ----------
 function viewTrainers(v) {
@@ -615,6 +723,7 @@ function viewCoins(v) {
   v.append(g);
 }
 function viewOpts(v) {
+  const S0name = S.name;
   const sp = el('select', { id: 'speed', onchange: () => { S.opts.speed = +sp.value; save(); } }, ...[[0.4, 'Rápida'], [1, 'Normal'], [1.8, 'Lenta']].map(([x, t]) => el('option', { value: x, selected: S.opts.speed == x ? true : null }, t)));
   v.append(el('div', { class: 'panel', style: 'max-width:640px;display:flex;flex-direction:column;gap:12px' },
     el('h2', { class: 'cond', style: 'color:var(--gold)' }, 'Opciones'),
@@ -623,7 +732,7 @@ function viewOpts(v) {
     el('div', { class: 'muted', style: 'font-size:13px' }, 'Versión del juego: ', el('b', { style: 'color:var(--gold)' }, APP_VERSION)),
     !window.claude ? el('div', {}, el('button', { onclick: forceUpdate }, '🔄 Buscar actualización')) : null,
     el('div', { class: 'muted', style: 'font-size:13px' }, dbRef ? 'Tu progreso se guarda automáticamente en tu cuenta y en este navegador.' : 'Tu progreso se guarda en este navegador. Usa "Exportar" para tener una copia de seguridad.'),
-    el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, el('button', { onclick: showEraPick }, '⇄ Cambiar de era'), el('button', { onclick: exportSave }, 'Exportar partida'), el('button', { onclick: importSave }, 'Importar partida'), el('button', { class: 'danger', onclick: () => showModal('¿Empezar de cero?', el('p', {}, MEGA ? 'Se borrará tu partida de la era Mega (la de la era WOTC no se toca).' : 'Se borrará tu colección, mazos y medallas.'), [{ t: 'Cancelar' }, { t: 'Borrar todo', cls: 'danger', f: () => { S = null; try { localStorage.removeItem(SAVE_KEY); } catch (e) {} if (dbRef) dbRef.set({ json: JSON.stringify(defaultSave()), updated: Date.now() }).catch(() => {}); showTitle(); } }]) }, 'Nueva partida'))));
+    modeSwitchRow(), el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, el('button', { onclick: showEraPick }, '⇄ Cambiar de era'), el('button', { onclick: exportSave }, 'Exportar partida'), el('button', { onclick: importSave }, 'Importar partida'), el('button', { class: 'danger', onclick: () => showModal('¿Empezar de cero?', el('p', {}, MODE !== 'camp' ? `Se borrará el progreso del modo «${MODES[MODE]}» (la campaña no se toca).` : MEGA ? 'Se borrará tu partida de la era Mega (la de la era WOTC no se toca).' : 'Se borrará tu colección, mazos y medallas.'), [{ t: 'Cancelar' }, { t: 'Borrar todo', cls: 'danger', f: () => { S = null; try { localStorage.removeItem(skey()); } catch (e) {} if (dbRef && MODE === 'camp') dbRef.set({ json: JSON.stringify(defaultSave()), updated: Date.now() }).catch(() => {}); MODE === 'camp' ? showTitle() : enterMode(MODE, S0name); } }]) }, MODE === 'camp' ? 'Nueva partida' : 'Reiniciar este modo'))));
 }
 
 // ================= MODALES =================
@@ -643,7 +752,8 @@ function preBattle(spec) {
   const errs = deck ? P.Decks.validate(deck.cards) : ['No tienes mazo'];
   let opp;
   const rng = Math.random;
-  if (spec.kind === 'mega') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: spec.t.id };
+  if (spec.kind === 'meta') opp = { name: spec.d.name, portrait: spec.d.cover, level: 5, deck: spec.d.cards.slice(), key: 'meta_' + spec.d.id };
+  else if (spec.kind === 'mega') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: spec.t.id };
   else if (spec.kind === 'route') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: spec.t.rival && spec.t.region === 'johto' ? C.silverDeck(spec.t, rng) : C.trainerDeck(spec.t, rng), key: spec.t.id, perk: spec.t.perk };
   else if (spec.kind === 'elite') opp = { name: spec.t.name, portrait: spec.t.portrait, level: 5, deck: C.eliteDeck(spec.t, rng), perk: spec.t.perk, key: spec.t.id };
   else if (spec.kind === 'gymTrainer') opp = { name: spec.t.name, portrait: spec.t.portrait, level: spec.t.level, deck: C.trainerDeck(spec.t, rng), key: 'g_' + spec.gym.id + '_' + spec.idx };
@@ -679,7 +789,7 @@ function startBattle(spec, myDeck) {
   const g = new P.Game({ modern: MEGA, ai: P.AI, players: [{ name: S.name, deck: myDeck.slice(), coin: S.coin }, { name: opp.name, deck: opp.deck, ai: { level: aiLvl }, perk: opp.perk, coin: Math.floor(Math.random() * COIN_COUNT) }], io: IO });
   g.portrait = opp.portrait;
   BT.g = g; render();
-  g.run().then(w => MEGA ? endBattleMega(w) : endBattle(w)).catch(e => { console.error(e); toast('Error en la partida: ' + e.message, 5000); });
+  g.run().then(w => spec.kind === 'meta' ? endBattleMeta(w) : MEGA ? endBattleMega(w) : endBattle(w)).catch(e => { console.error(e); toast('Error en la partida: ' + e.message, 5000); });
 }
 const IO = {
   log(g, m) { const L = $('#log'); const d = el('div', { class: m.startsWith('—') ? 't' : m.startsWith('💥') ? 'ko' : m.startsWith('🏆') ? 'win' : '' }, m); L.append(d); L.scrollTop = L.scrollHeight; },
@@ -1309,7 +1419,7 @@ const start = () => {
   let picked = false; try { picked = sessionStorage.getItem('ptcg_era_ok') === '1'; } catch (e) { picked = true; }
   if (!picked && !new URLSearchParams(location.search).get('era') && !new URLSearchParams(location.search).get('net')) return showEraPick();
   const ls = lsGet();
-  if (ls && ls.name) { S = Object.assign(defaultSave(), ls); showHub(); } else showTitle();
+  if (ls && ls.name) { S = Object.assign(defaultSave(), ls); if (MODE === 'free') { for (const d of P.CARDS) if (!ENERGY_BASIC.includes(d.id) && !(d.st === 'E' && d.basic)) S.coll[d.id] = 4; } showHub(DEF_VIEW[MODE]); } else if (MODE !== 'camp') enterMode(MODE, 'Entrenador'); else showTitle();
   initCloud();
 };
 start();
