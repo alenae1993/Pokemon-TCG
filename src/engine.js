@@ -86,7 +86,7 @@ class Game {
   opp(p) { return this.p[1 - p.i]; }
   log(m) { this.logs.push(m); if (this.io.log) this.io.log(this, m); }
   upd() { if (this.io.update) this.io.update(this); }
-  async ask(p, req) { req.player = p; if (p.ai) return this.ai.decide(this, p, req); return this.io.ask(this, p, req); }
+  async ask(p, req) { req.player = p; if (p.ai) return (p.ai.mod || this.ai).decide(this, p, req); return this.io.ask(this, p, req); }
   check() { if (this.winner != null) throw new GameOver(this.winner); }
 
   // ---------- monedas ----------
@@ -551,7 +551,7 @@ class Game {
     // devolver mano apartada (Máquina de Cosquillas) – se devuelve al final de su turno
     this.upd();
     p.turnOver = false;
-    if (p.ai) await this.ai.takeTurn(this, p);
+    if (p.ai) await (p.ai.mod || this.ai).takeTurn(this, p);
     else await this.io.humanTurn(this, p);
     this.check();
     await this.endTurn(p);

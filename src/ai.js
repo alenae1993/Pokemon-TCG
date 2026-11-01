@@ -50,6 +50,7 @@ function cardValue(g, p, c) {
   const d = g.def(c);
   if (d.st === 'P') {
     let v = 10 + d.hp / 10;
+    if (d.pw && d.pw.name === "M:Hide 'n' Sneak" && p.deck.concat(p.hand, g.slots(p).map(s => s.cards[s.cards.length - 1])).some(x => /Dhelmise|Sinistcha|Spiritomb/.test(g.def(x).name))) return 2;
     if (d.stage > 0 && g.slots(p).some(s => g.baseDef(s).name === d.from)) v += 30;
     if (d.stage === 0 && p.bench.length < 3) v += 15;
     return v;
@@ -57,6 +58,23 @@ function cardValue(g, p, c) {
   if (d.st === 'E') { const need = g.slots(p).some(s => g.eff(s).atk.some(a => a.cost.includes(d.etype))); return need ? 18 : (d.basic ? 6 : 14); }
   const pri = { 'Professor Oak': 20, 'Bill': 18, 'Computer Search': 22, 'Gust of Wind': 20, 'PlusPower': 14, 'Energy Removal': 18, 'Super Energy Removal': 20, 'Pokémon Breeder': 16, 'Switch': 14, 'Potion': 10, 'Super Potion': 12 };
   return pri[d.name] || 9;
+}
+const prizesOf = (g, s) => (s && g.modern ? (g.baseDef(s).prizes || 1) : 1);
+function reqAmount(req) { if (req.amount) return req.amount; const t = req.title || ''; let m = t.match(/(\d+)\s*de daño/); if (m) return +m[1]; m = t.match(/(\d+)\s*contadores? de daño/) || t.match(/\((\d+)\s*contadores?\)/) || t.match(/poner (\d+) contadores?/); if (m) return 10 * +m[1]; if (/1 contador/.test(t)) return 10; return 0; }
+// daño efectivo de una cantidad fija al objetivo (Debilidad/Resistencia sólo en el Activo y sólo si es daño)
+function effAmount(g, p, s, amt, isDamage) { if (!isDamage || !g.isActive(s) || !p.active) return amt; const ae = g.eff(p.active), te = g.eff(s); let d = amt; if (te.weak && ae.types.includes(te.weak)) d *= 2; if (te.res && ae.types.includes(te.res)) d -= (te.d && te.d.resV) || 30; return Math.max(0, d); }
+// valor de dejar Fuera de Combate a s
+function koValue(g, s) { return 1000 + 300 * prizesOf(g, s) + s.energy.length * 25 + s.cards.length * 15; }
+function targetScore(g, p, s, amt, isDamage) {
+  const o = g.opp(p); if (s.owner === p.i) return -9999;
+  if (s.fx.immune || g.effectsBlocked(s, p)) return -500;
+  const hl = g.hpLeft(s); if (!amt) return (hl <= 20 ? 100 : 0) - hl + s.cards.length * 10 + s.energy.length * 5 + prizesOf(g, s) * 15;
+  const d = effAmount(g, p, s, amt, isDamage);
+  if (d >= hl) return koValue(g, s);
+  // preparar un K.O. para el próximo turno con el atacante actual
+  let v = d / 4 + prizesOf(g, s) * 20 + s.cards.length * 8 + s.energy.length * 6;
+  if (p.active) { const b = bestAttack(g, p, p.active, s); if (b && b.miss <= 1 && estDmg(g, p.active, s, b.a) >= hl - d) v += 150 * prizesOf(g, s); }
+  return v - (hl - d) / 6;
 }
 function pickN(list, n, score) { return list.slice().sort((a, b) => score(b) - score(a)).slice(0, n); }
 
@@ -140,21 +158,21 @@ function pickSlot(g, p, req) {
   const best = (f) => opts.slice().sort((a, b) => f(b) - f(a))[0];
   const myAtk = p.active ? bestAttack(g, p, p.active, null) : null;
   switch (pur) {
-    case 'damageOpp': case 'curseTo': return best(s => (g.hpLeft(s) <= 20 ? 100 : 0) - g.hpLeft(s) + s.cards.length * 10 + s.energy.length * 5);
+    case 'damageOpp': case 'curseTo': { const amt = reqAmount(req); const isDmg = pur === 'damageOpp' && /daño/.test(req.title || ''); if (opts.some(s => s.owner === p.i)) return best(s => s.owner === p.i ? -9999 + (g.hpLeft(s) > 30 ? g.hpLeft(s) : 0) : targetScore(g, p, s, amt, isDmg)); return best(s => targetScore(g, p, s, amt, isDmg)); }
     case 'gustTarget': {
-      return best(s => { if (!p.active) return 0; const b = bestAttack(g, p, p.active, s); const d = b && b.miss === 0 ? estDmg(g, p.active, s, b.a) : 0; return (d >= g.hpLeft(s) ? 200 : 0) + d - g.hpLeft(s) / 3 + g.retreatCost(s) * 10 - g.energyCount(s) * 5 + s.cards.length * 15; });
+      return best(s => { if (!p.active) return 0; const b = bestAttack(g, p, p.active, s); const d = b && b.miss === 0 ? estDmg(g, p.active, s, b.a) : 0; return (d >= g.hpLeft(s) ? 200 + 150 * prizesOf(g, s) : 0) + d - g.hpLeft(s) / 3 + g.retreatCost(s) * 10 - g.energyCount(s) * 5 + s.cards.length * 15; });
     }
-    case 'newActive': return best(s => { const b = bestAttack(g, p, s, o.active); return (b && b.miss === 0 ? 60 + b.dmg : -((b ? b.miss : 3) * 10)) + g.hpLeft(s) / 3 - (s.cards.length && g.eff(s).trainerMon ? 200 : 0); });
+    case 'newActive': { const anyReady = opts.some(s => { const b = bestAttack(g, p, s, o.active); return b && b.miss === 0; }); return best(s => { const b = bestAttack(g, p, s, o.active); const ready = b && b.miss === 0; let v = ready ? 60 + b.dmg + (o.active && b.dmg >= g.hpLeft(o.active) ? 80 * prizesOf(g, o.active) : 0) : -((b ? b.miss : 3) * 10); if (!anyReady) v += -g.retreatCost(s) * 12 - (prizesOf(g, s) - 1) * 40; return v + g.hpLeft(s) / 3 - (s.cards.length && g.eff(s).trainerMon ? 200 : 0); }); }
     case 'healOwn': case 'cureOwn': return best(s => s.dmg + (g.isActive(s) ? 15 : 0));
     case 'energyTarget': return best(s => { const b = bestAttack(g, p, s, o.active); return (b ? 30 - b.miss * 2 + b.dmg / 5 : 0) + (g.isActive(s) ? 20 : 0); });
     case 'energyFrom': return best(s => s.energy.length - (g.isActive(s) ? 5 : 0));
-    case 'removeEnergy': return best(s => s.energy.length * 10 + (g.isActive(s) ? 15 : 0) + s.cards.length * 5);
+    case 'removeEnergy': return best(s => { if (s.owner === p.i) return -999; const b = bestAttack(g, o, s, p.active); let v = s.energy.length * 6 + (g.isActive(s) ? 25 : 0) + s.cards.length * 5 + prizesOf(g, s) * 8; if (b && b.miss === 0) { const tok = g.energyTokens(s); if (tok.length - 1 < b.a.cost.length) v += 50; } else if (b && b.miss === 1) v += 15; return v; });
     case 'scoopDamaged': return best(s => s.dmg - s.energy.length * 5);
     case 'own': case 'sacrifice': return best(s => g.hpLeft(s) - s.cards.length * 20);
     case 'defender': case 'attachTool': case 'giovanni': return best(s => (g.isActive(s) ? 50 : 0) + s.dmg);
     case 'curseFrom': return best(s => (g.hpLeft(s) > 20 ? s.dmg : -50));
     case 'swapFrom': return best(s => (g.isActive(s) ? 50 : 0) + s.dmg);
-    case 'swapTo': return best(s => g.hpLeft(s));
+    case 'swapTo': return best(s => g.hpLeft(s) - (g.baseDef(s).pw && g.baseDef(s).pw.name === 'Damage Swap' ? 200 : 0) - (g.isActive(s) ? 40 : 0));
     case 'bounceOpp': return best(s => s.cards.length * 20 + s.energy.length * 10);
     case 'narrow': return best(s => -slotValue(g, s, o));
     case 'ninjaSwitch': case 'fleeSwitch': case 'optionalSwitch': {
@@ -211,7 +229,7 @@ AI.takeTurn = async function (g, p) {
   guard = 0;
   for (const s of g.slots(p)) {
     const d = g.baseDef(s); if (!d.pw) continue; const P = FX.pw[d.pw.name];
-    while (ok() && guard++ < 10 && g.powerUsable(p, s) && P.ai && P.ai(g, p, s)) { await g.usePower(p, s); await sleep(350); if (P.once) break; }
+    while (ok() && guard++ < 60 && g.powerUsable(p, s) && P.ai && P.ai(g, p, s)) { const before = JSON.stringify(g.slots(p).map(x => [x.dmg, x.energy.length])) + p.hand.length; await g.usePower(p, s); await sleep(350); if (P.once) break; if (before === JSON.stringify(g.slots(p).map(x => [x.dmg, x.energy.length])) + p.hand.length) break; }
   }
   { const st = g.stadiumAction(p); if (st && st.aiAction && ok() && st.aiAction(g, p)) { await g.useStadium(p); await sleep(300); } }
   if (!ok() || !p.active) return;
@@ -261,8 +279,17 @@ AI.takeTurn = async function (g, p) {
   else {
     choice = usable.map(u => {
       const d = estDmg(g, p.active, o.active, u.a);
-      let v = d + (o.active && d >= g.hpLeft(o.active) ? 80 : 0);
       const t = u.a.text || '';
+      let v = d + (o.active && d >= g.hpLeft(o.active) ? 80 + 70 * prizesOf(g, o.active) : 0);
+      // daño o contadores a cualquier Pokémon / Banca: ¿hay un K.O. disponible fuera del Activo?
+      const snipe = t.match(/does (\d+) damage to 1 of your opponent's (?:Benched )?Pokémon/) || t.match(/also does (\d+) damage to 1 of your opponent's Benched/);
+      const ctr = t.match(/(?:Place|Put) (\d+) damage counters? on (?:1 of )?your opponent's (?:Benched )?Pokémon/);
+      const amt = snipe ? +snipe[1] : ctr ? 10 * +ctr[1] : 0;
+      if (amt) { const ko = o.bench.filter(b => !b.fx.immune && !g.effectsBlocked(b, p) && g.hpLeft(b) <= amt); if (ko.length) v += 60 + 70 * Math.max(...ko.map(b => prizesOf(g, b))); else v += amt / 8; }
+      if (/on your opponent's Benched Pokémon in any way you like/.test(t)) { const cn = +(t.match(/(?:Put|Place) (\d+) damage counters/) || [0, 0])[1]; const ko = o.bench.filter(b => !b.fx.immune && g.hpLeft(b) <= cn * 10); v += ko.length ? 50 + 60 * Math.max(...ko.map(b => prizesOf(g, b))) : cn * 3; }
+      // si el rival nos deja K.O. el próximo turno y no podemos ganar ahora, valorar protecciones
+      const threat = o.active && (() => { const b = bestAttack(g, o, o.active, p.active); return b && b.miss <= 1 && estDmg(g, o.active, p.active, b.a) >= g.hpLeft(p.active); })();
+      if (threat && !(o.active && d >= g.hpLeft(o.active)) && /prevent all damage|takes \d+ less damage|can't use attacks|can't attack|now Paralyzed|now Asleep/.test(t)) v += 25;
       if (/does (\d+) damage to itself/.test(t)) { const m = +t.match(/does (\d+) damage to itself/)[1]; if (m >= g.hpLeft(p.active)) v -= 150; else v -= m / 3; }
       if (/Discard (all|\d+|\w+) .*Energy/.test(t) && !(o.active && d >= g.hpLeft(o.active))) v -= 15;
       if (/Paralyzed|Asleep|Confused|Poisoned/.test(t) && /Defending/.test(t)) v += 12;
@@ -275,21 +302,56 @@ AI.takeTurn = async function (g, p) {
   await sleep(400);
   await g.attack(p, choice.i);
 };
+// valor de un atacante con ciertas fichas de energía (mira también las evoluciones que hay en la mano)
+const FDEF = [1, 0.55, 0.3, 0.16, 0.08, 0.04];
+function atkPool(g, p, s) {
+  const list = g.eff(s).atk.map(a => ({ a, src: s }));
+  const bd = g.baseDef(s);
+  for (const c of p.hand) { const d = g.def(c); if (d.st === 'P' && d.stage > 0 && d.from === bd.name && !g.firstTurn[p.i]) d.atk.forEach(a => list.push({ a, evo: true })); }
+  return list;
+}
+function attackerValue(g, p, s, tok, opts = {}) {
+  const o = g.opp(p); const def = o.active; const hl = def ? g.hpLeft(def) : 999;
+  let best = 0;
+  for (const { a, evo } of atkPool(g, p, s)) {
+    const cost = evo ? a.cost : (g.attackCost ? g.attackCost(s, a) : a.cost);
+    const miss = deficit(tok, cost);
+    let d = estDmg(g, s, def, a); if (!d && a.fx) d = 15;
+    if (def && d >= hl) d += 40 + 40 * prizesOf(g, def);
+    let v = d * (FDEF[miss] || 0.02);
+    if (evo) v *= 0.8;
+    if (miss === 0 && g.isActive(s)) v *= 1.25;
+    if (v > best) best = v;
+  }
+  // un Pokémon que va a caer este turno rival vale menos como destino de energía
+  if (opts.threat) best *= 0.45;
+  return best;
+}
+function threatened(g, p, s) { const o = g.opp(p); if (!o.active || !g.isActive(s)) return false; const b = bestAttack(g, o, o.active, s); return !!(b && b.miss <= 1 && estDmg(g, o.active, s, b.a) >= g.hpLeft(s)); }
 async function maybeRetreat(g, p) {
   const o = g.opp(p); const a = p.active; if (!a || !p.bench.length) return;
   if (!g.canRetreat(p)) return;
-  const cur = bestAttack(g, p, a, o.active);
-  const curOk = cur && cur.miss === 0;
-  const danger = o.active && (() => { const b = bestAttack(g, o, o.active, a); return b && b.miss <= 1 && estDmg(g, o.active, a, b.a) >= g.hpLeft(a); })();
+  const cost = g.retreatCost(a); const tokA = g.energyTokens(a);
+  if (cost > 0 && tokA.length < cost) return;
+  const hasEnergy = p.hand.some(c => g.isEnergy(c)) && !p.energyPlayed;
+  const nowVal = s => { const b = bestAttack(g, p, s, o.active); if (!b || b.miss > (hasEnergy ? 1 : 0)) return -20 - (b ? b.miss : 4) * 10; let d = estDmg(g, s, o.active, b.a); if (!d && b.a.fx) d = 12; if (o.active && d >= g.hpLeft(o.active)) d += 60 + 50 * prizesOf(g, o.active); return d - (b.miss ? 15 : 0); };
+  const cur = (() => { const b = bestAttack(g, p, a, o.active); if (!b || b.miss > (hasEnergy ? 1 : 0)) return -20 - (b ? b.miss : 4) * 10; let d = estDmg(g, a, o.active, b.a); if (!d && b.a.fx) d = 12; if (o.active && d >= g.hpLeft(o.active)) d += 60 + 50 * prizesOf(g, o.active); return d - (b.miss ? 15 : 0); })();
   let bestB = null, bv = -1e9;
-  for (const s of p.bench) { const b = bestAttack(g, p, s, o.active); const v = (b && b.miss === 0 ? 50 + b.dmg : -(b ? b.miss : 4) * 15) + g.hpLeft(s) / 4; if (v > bv) { bv = v; bestB = s; } }
-  const cost = g.retreatCost(a);
-  const shouldMove = (!curOk && bv > 40) || (danger && g.hpLeft(bestB) > g.hpLeft(a) && bv > 0 && a.cards.length > 1) || (a.st === 'confused' && bv > 30);
-  if (shouldMove && cost <= 2 && (cost === 0 || g.energyTokens(a).length - cost >= 0)) {
-    await g.retreat(p, bestB);
-  }
+  for (const s of p.bench) { if (g.eff(s).trainerMon) continue; const v = nowVal(s) + g.hpLeft(s) / 10; if (v > bv) { bv = v; bestB = s; } }
+  if (!bestB) return;
+  const danger = threatened(g, p, a);
+  const pricey = prizesOf(g, a) >= 2 || a.cards.length > 1 || a.energy.length >= 2;
+  let should = false;
+  if (a.st === 'confused' && bv > 10) should = true;
+  if (cur <= 0 && bv > 20) should = true;                       // no puede atacar y hay alguien que sí
+  if (bv >= cur + 40 && bv > 30) should = true;                  // un atacante claramente mejor
+  if (danger && pricey && bv > 0 && cur < 60) should = true;      // salvar a un Pokémon valioso que va a caer
+  // no tirar energía valiosa sin necesidad
+  // en la era WOTC la energía es escasa (Quitar Energía): sólo retiradas baratas salvo emergencia
+  const lostOk = g.modern ? (cost <= 2 || (danger && pricey && cost <= 3)) : (cost === 0 || (cost === 1 && (cur <= 0 || danger)) || (cost === 2 && cur <= 0 && danger && pricey));
+  if (should && lostOk) await g.retreat(p, bestB);
 }
-async function attachBest(g, p) {
+async function attachOld(g, p) {
   const o = g.opp(p);
   const en = p.hand.filter(c => g.isEnergy(c));
   if (!en.length || p.energyPlayed) return;
@@ -316,6 +378,29 @@ async function attachBest(g, p) {
     if (v > bv) { bv = v; best = [c, s]; }
   }
   if (best && bv > -20) await g.attach(p, best[0], best[1]);
+}
+async function attachBest(g, p) {
+  if (!g.modern && process.env.EXP === 'attach') return attachOld(g, p);
+  const o = g.opp(p);
+  const en = p.hand.filter(c => g.isEnergy(c));
+  if (!en.length || p.energyPlayed) return;
+  let best = null, bv = -1e9;
+  for (const c of en) for (const s of g.slots(p)) {
+    if (!g.canAttach(p, c, s)) continue;
+    const tok = g.energyTokens(s); const add = tokOf(g, c);
+    if (!atkPool(g, p, s).length) continue;
+    const thr = threatened(g, p, s);
+    const before = attackerValue(g, p, s, tok, { threat: thr }), after = attackerValue(g, p, s, tok.concat(add), { threat: thr });
+    let v = after - before;
+    // atacar este turno con el Activo
+    if (g.isActive(s)) { const nb = bestAttack(g, p, s, o.active), wb = bestAttack(g, p, s, o.active, add); if (wb && wb.miss === 0 && (!nb || nb.miss > 0)) v += 20; }
+    if (g.eff(s).types.includes(add[0])) v += 3;
+    if (g.def(c).name === 'Rainbow Energy' && g.hpLeft(s) <= 10) v -= 200;
+    if (g.def(c).name === 'Double Colorless Energy' && !atkPool(g, p, s).some(({ a }) => a.cost.filter(x => x === 'C').length >= 2)) v -= 8;
+    v += Math.min(g.hpLeft(s), 200) / 50 + s.cards.length;
+    if (v > bv) { bv = v; best = [c, s]; }
+  }
+  if (best && bv > -10) await g.attach(p, best[0], best[1]);
 }
 AI.bestAttack = bestAttack; AI.estDmg = estDmg; AI.deficit = deficit;
 root.PTCG.AI = AI;

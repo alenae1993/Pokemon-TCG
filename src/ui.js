@@ -15,7 +15,7 @@ if (MEGA) { try { document.querySelector('#topbar .brand').textContent = 'LIGA M
 const ENERGY_BASIC = MEGA ? C.ENERGY_BASIC : ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const ENERGY_ID = MEGA ? C.ENERGY_ID : P.Decks.ENERGY_ID;
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v15 · Modos «Abrir sobres» y «Todas las cartas» con mazos meta';
+const APP_VERSION = 'v16 · IA mejorada (energía, retiradas, objetivos y K.O. por premios)';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}

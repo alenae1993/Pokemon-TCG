@@ -57,7 +57,7 @@ const MEGA = [
     desc: 'Mazo de Oscuridad Absoluta: llena el descarte de Pokémon con Escondite para que Dhelmise golpee por 170 y Sinistcha/Spiritomb castiguen a todo el campo rival.',
     subs: ['Limitless no permitió abrir esa lista: la armé con las cartas de Oscuridad Absoluta del arquetipo'],
     list: [[4, 'Poltchageist'], [2, 'Sinistcha'], [4, 'Dhelmise'], [4, 'Shuppet'], [3, 'Banette'], [1, 'Spiritomb'], [1, 'Fezandipiti ex'], [1, 'Meowth ex'],
-      [4, "Lillie's Determination"], [3, "Boss's Orders"], [4, 'Ultra Ball'], [4, 'Buddy-Buddy Poffin'], [4, 'Poké Pad'], [2, 'Night Stretcher'], [2, 'Judge'], [1, 'Switch'], [2, 'Air Balloon'], [2, 'Jacinthe'], [2, 'Wondrous Patch'],
+      [4, "Lillie's Determination"], [3, "Boss's Orders"], [4, 'Ultra Ball'], [4, 'Buddy-Buddy Poffin'], [4, 'Poké Pad'], [2, 'Night Stretcher'], [2, 'Judge'], [1, 'Switch'], [2, 'Air Balloon'], [2, 'Gwynn'], [2, 'Wondrous Patch'],
       [10, 'P']] },
 ];
 const BUL = 'https://bulbapedia.bulbagarden.net/wiki/';
