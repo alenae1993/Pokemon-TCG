@@ -15,7 +15,7 @@ if (MEGA) { try { document.querySelector('#topbar .brand').textContent = 'LIGA M
 const ENERGY_BASIC = MEGA ? C.ENERGY_BASIC : ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const ENERGY_ID = MEGA ? C.ENERGY_ID : P.Decks.ENERGY_ID;
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v13 · Era Mega: Megaevolución + Fuegos Fantasmales';
+const APP_VERSION = 'v14 · Era Mega: Héroes Ascendentes, Equilibrio Perfecto y Oscuridad Absoluta';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}
@@ -201,7 +201,7 @@ function showTitle() {
   const wrap = el('div', { style: 'display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px 16px;width:100%;' });
   wrap.append(el('div', { class: 'logo' }, MEGA ? 'LIGA MEGA' : 'LIGA KANTO', el('br'), el('span', { style: 'font-size:.42em;color:var(--ink);text-shadow:none' }, 'JUEGO DE CARTAS COLECCIONABLES')));
   wrap.append(el('div', { class: 'muted', style: 'font-size:12px' }, APP_VERSION));
-  wrap.append(el('div', { class: 'muted', style: 'max-width:640px;text-align:center' }, MEGA ? 'Era Mega: Megaevolución y Fuegos Fantasmales, con reglas modernas (Pokémon ex, Habilidades, Partidarios). Vence a la lista de entrenadores y desbloquea niveles cada vez más difíciles.' : 'Base Set, Jungle, Fossil, Base Set 2, Team Rocket, Gym Heroes y Gym Challenge. Abre sobres, arma tu mazo y vence a los 8 líderes de gimnasio de Kanto.'), el('button', { onclick: showEraPick }, '⇄ Cambiar de era (' + (MEGA ? 'Mega' : 'WOTC') + ')'));
+  wrap.append(el('div', { class: 'muted', style: 'max-width:640px;text-align:center' }, MEGA ? 'Era Mega: Megaevolución, Fuegos Fantasmales, Héroes Ascendentes, Equilibrio Perfecto y Oscuridad Absoluta, con reglas modernas (Pokémon ex, Habilidades, Partidarios). Vence a la lista de entrenadores y desbloquea niveles cada vez más difíciles.' : 'Base Set, Jungle, Fossil, Base Set 2, Team Rocket, Gym Heroes y Gym Challenge. Abre sobres, arma tu mazo y vence a los 8 líderes de gimnasio de Kanto.'), el('button', { onclick: showEraPick }, '⇄ Cambiar de era (' + (MEGA ? 'Mega' : 'WOTC') + ')'));
   let pick = 0;
   const nameIn = el('input', { id: 'pname', placeholder: 'Tu nombre de entrenador', maxlength: 18, value: 'Rojo' });
   const grid = el('div', { class: 'starters' });
@@ -290,7 +290,7 @@ function showEraPick() {
   const megaCover = (P.CARDS_MEGA || []).find(d => d.name === 'Mega Charizard X ex');
   const ERAS = [
     { id: 'wotc', name: 'Era WOTC', years: '1999 – 2003', desc: 'De Base Set a e-Card: Kanto, Johto e Islas Naranja. Poké-Powers, Bebés, Pokémon Oscuros y Brillantes.', key: 'ptcg_kanto_save_v1', cover: 'base1-4' },
-    { id: 'mega', name: 'Era Mega', years: '2025 – 2026', desc: 'Megaevolución y Fuegos Fantasmales con reglas modernas: Pokémon ex y Megaevolución ex, Habilidades, Partidarios y Estadios.', key: 'ptcg_mega_save_v1', cover: megaCover ? megaCover.id : null },
+    { id: 'mega', name: 'Era Mega', years: '2025 – 2026', desc: 'Megaevolución, Fuegos Fantasmales, Héroes Ascendentes, Equilibrio Perfecto y Oscuridad Absoluta con reglas modernas: Pokémon ex y Megaevolución ex, Habilidades, Partidarios y Estadios.', key: 'ptcg_mega_save_v1', cover: megaCover ? megaCover.id : null },
   ];
   const grid = el('div', { class: 'eras' });
   for (const e of ERAS) {

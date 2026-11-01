@@ -116,8 +116,9 @@ class Game {
   }
 
   // ---------- consultas de cartas ----------
-  isPokemonCard(c) { const d = this.def(c); return d.st === 'P' || d.name === 'Clefairy Doll' || d.name === 'Mysterious Fossil'; }
-  isBasicCard(c) { const d = this.def(c); return (d.st === 'P' && d.stage === 0) || d.name === 'Clefairy Doll' || d.name === 'Mysterious Fossil'; }
+  isPokemonCard(c) { const d = this.def(c); return d.st === 'P' || d.name === 'Clefairy Doll' || d.name === 'Mysterious Fossil' || !!d.fossilMon; }
+  isDoll(d) { return d.name === 'Clefairy Doll' || d.name === 'Mysterious Fossil' || !!d.fossilMon; }
+  isBasicCard(c) { const d = this.def(c); return (d.st === 'P' && d.stage === 0) || this.isDoll(d); }
   isEvoCard(c) { const d = this.def(c); return d.st === 'P' && d.stage > 0; }
   isEnergy(c) { return this.def(c).st === 'E'; }
   isBasicEnergy(c) { const d = this.def(c); return d.st === 'E' && d.basic; }
@@ -136,7 +137,7 @@ class Game {
   eff(slot) {
     const d = this.baseDef(slot);
     if (d.st !== 'P') { // Muñeco Clefairy / Fósil
-      return { name: d.name, nameEs: d.nameEs, hp: d.name === 'Clefairy Doll' ? 10 : 10, types: ['C'], weak: null, res: null, atk: [], ret: 0, pw: null, stage: 0, trainerMon: true, d };
+      return { name: d.name, nameEs: d.nameEs, hp: d.fossilHp || 10, types: ['C'], weak: null, res: null, atk: [], ret: 0, pw: null, stage: 0, trainerMon: true, d };
     }
     let e = { name: d.name, nameEs: d.nameEs, hp: d.hp, types: d.types.slice(), weak: d.weak, res: d.res, atk: d.atk.map((a, i) => Object.assign({ src: d.id, idx: i }, a)), ret: d.ret, pw: d.pw, stage: d.stage, d };
     // Transformación (Ditto)
@@ -169,6 +170,7 @@ class Game {
     if (this.stadiumIs("Rocket's Hideout") && e.name.indexOf('Dark ') === 0) e.hp += 20;
     { const pk = this.ownerOf(slot).perk; if (pk === 'clair' || pk === 'lance' || pk === 'luana') e.hp += 20; }
     if (slot.fx.submerge) e.types = ['W'];
+    if (this.hooks && this.hooks.effMod) this.hooks.effMod(this, slot, e);
     if (slot.fx.crystal) e.types = [slot.fx.crystal.v];
     for (const c of slot.att) { const cd = this.def(c);
       if (cd.name === 'Crystal Shard') e.types = ['C'];
@@ -224,6 +226,7 @@ class Game {
     if (!d.pw) return false;
     if (this.powersOff >= this.turnNo) return false;
     if (slot.fx.powerOff) return false;
+    if (this.hooks && this.hooks.powerOff && this.hooks.powerOff(this, slot, d)) return false;
     if (d.baby) { const o = this.opp(this.ownerOf(slot)); if (o.active && o.active !== slot && this.baseDef(o.active).pw && this.baseDef(o.active).pw.name === 'Scare' && !this.statusBlocksPower(o.active) && this.powersOff < this.turnNo) return false; }
     if (d.pw.name !== 'Toxic Gas') {
       for (const s of this.allSlots()) {
@@ -349,6 +352,7 @@ class Game {
   discardSlot(slot) { const p = this.ownerOf(slot); this.removeSlot(slot); for (const c of this.slotCards(slot)) { delete c.buzzap; this.toDiscard(c); } }
   toDiscard(c) {
     const p = this.p[c.owner];
+    if (c.koToHand) { delete c.koToHand; delete c.inPlay; p.hand.push(c); return; }
     if (c.inPlay) { delete c.inPlay; delete c.conv; if (this.def(c).name === 'Recycle Energy' && !this.miraculousWind()) { p.hand.push(c); this.log('La Energía Reciclaje vuelve a la mano.'); return; } }
     p.discard.push(c);
   }
@@ -645,7 +649,7 @@ class Game {
       if (rebirth && await this.ask(pl, { kind: 'yesno', title: '¿Usar Renacer y devolver a Moltres del Team Rocket a tu mano?', purpose: 'yes' })) {
         const c = pl.discard.find(c => this.def(c).name === "Rocket's Moltres"); if (c) { this.removeFrom(pl.discard, c); pl.hand.push(c); }
       }
-      if (!e.trainerMon) {
+      if (!e.trainerMon || this.baseDef(s).fossilMon) {
         let n = this.modern ? (this.baseDef(s).prizes || 1) : 1;
         if (this.modern && this.hooks) n = this.hooks.prizes(this, s, attackCtx, n, pl, o);
         for (let k = 0; k < n && o.prizes.length; k++) { o.hand.push(o.prizes.pop()); }
@@ -701,7 +705,7 @@ class Game {
     if (this.anyPower('Prehistoric Power').length) return [];
     return this.slots(p).filter(s => {
       const bd = this.baseDef(s);
-      if (bd.st !== 'P' && bd.name !== 'Mysterious Fossil') return false;
+      if (bd.st !== 'P' && bd.name !== 'Mysterious Fossil' && !bd.fossilMon) return false;
       if (bd.name === 'Buried Fossil' && d.from === 'Mysterious Fossil') { /* ok */ }
       if (bd.pw && bd.pw.name === 'Transform' && this.isActive(s)) return false;
       if (bd.name !== d.from && !(bd.name === 'Buried Fossil' && d.from === 'Mysterious Fossil')) return false;
@@ -851,15 +855,17 @@ class Game {
   }
   // --- entrenadores ---
   trainerFx(c) { const d = this.def(c); return d.era === 'mega' ? FX.tr['M:' + d.name] : FX.tr[d.name]; }
+  itemLocked(p, d) { return !!(this.modern && d.sub && d.sub.includes('Item') && p.flags.noItem && p.flags.noItem.until >= this.turnNo); }
   canPlayTrainer(p, c) {
     if (!this.canAct(p) || !p.hand.includes(c) || !this.isTrainer(c)) return false;
     const d = this.def(c);
-    if (d.name === 'Clefairy Doll' || d.name === 'Mysterious Fossil') return !this.noTrainers(p) && p.bench.length < this.benchMax(p);
+    if (this.isDoll(d)) return !this.noTrainers(p) && !this.itemLocked(p, d) && p.bench.length < this.benchMax(p);
     if (this.noTrainers(p)) return false;
+    if (this.itemLocked(p, d)) return false;
     const t = this.trainerFx(c); if (!t) return false;
     if (d.sub && d.sub.includes('Supporter') && (p.supporterPlayed || (p.flags.noSupporter && p.flags.noSupporter.until >= this.turnNo))) return false;
     if (d.sub && d.sub.includes('Stadium') && this.stadium && this.def(this.stadium).name === d.name) return false;
-    if (this.modern && d.sub && d.sub.includes('Supporter') && this.turnNo === 1) return false;
+    if (this.modern && d.sub && d.sub.includes('Supporter') && this.turnNo === 1 && !t.firstTurn) return false;
     if (this.modern && d.sub && d.sub.includes('Stadium') && (p.stadiumPlayed || (p.flags.noStadium && p.flags.noStadium.until >= this.turnNo))) return false;
     if (d.sub && d.sub.includes('Pokémon Tool') && !this.slots(p).some(s => this.toolRoom(s))) return false;
     if (t.can && !t.can(this, p, c)) return false;
@@ -868,7 +874,7 @@ class Game {
   async playTrainer(p, c, opts = {}) {
     if (!opts.force && !this.canPlayTrainer(p, c)) return false;
     const d = this.def(c);
-    if (d.name === 'Clefairy Doll' || d.name === 'Mysterious Fossil') return this.playBasic(p, c);
+    if (this.isDoll(d)) return this.playBasic(p, c);
     const t = this.trainerFx(c);
     if (!opts.fromDiscard) this.removeFrom(p.hand, c);
     if (d.sub && d.sub.includes('Supporter')) p.supporterPlayed = true;
@@ -957,6 +963,7 @@ class Game {
     const e = this.eff(s);
     return e.atk.map((a, i) => ({ a, i, ok: this.attackUsable(p, i).ok, why: this.attackUsable(p, i).why }));
   }
+  attackCost(s, a) { const F = FX.atk[a.fx]; let c = F && F.cost ? F.cost(this, s, a) : a.cost; if (this.hooks && this.hooks.cost) c = this.hooks.cost(this, s, a, c); return c; }
   attackUsable(p, i) {
     const s = p.active; if (!s || !this.canAct(p)) return { ok: false, why: 'No es tu turno' };
     const e = this.eff(s); const a = e.atk[i]; if (!a) return { ok: false };
@@ -971,7 +978,8 @@ class Game {
     const o = this.opp(p);
     if (s.fx.cantAttackSlot && o.active && s.fx.cantAttackSlot.v === o.active.u) return { ok: false, why: 'No puede atacar a ese Pokémon' };
     const F = FX.atk[a.fx];
-    if (!this.canPay(F && F.cost ? F.cost(this, s, a) : a.cost, this.energyTokens(s))) return { ok: false, why: 'Energía insuficiente' };
+    if (this.hooks && this.hooks.canAttack) { const why = this.hooks.canAttack(this, p, s, a); if (why) return { ok: false, why }; }
+    if (!this.canPay(this.attackCost(s, a), this.energyTokens(s))) return { ok: false, why: 'Energía insuficiente' };
     if (F && F.cond && !F.cond(this, p, s, a)) return { ok: false, why: 'No se cumplen las condiciones' };
     return { ok: true };
   }
@@ -1169,6 +1177,7 @@ class Game {
       // supervivencia al K.O. (Aguante, Blindaje, Cinta Focus, Viaje en el Tiempo, Repartir Exp.)
       for (const t of this.slots(o).slice()) {
         if (t.dmg < this.hp(t) || !x.damaged.some(([dd]) => dd === t)) continue;
+        if (this.hooks && this.hooks.survive && await this.hooks.survive(this, t, x, o)) continue;
         if (t.fx.endure) { t.dmg = this.hp(t) - 10; this.log(`Aguante: ${this.nm(t)} resiste con 10 PS.`); continue; }
         if (t.fx.armorUp) { const r = await this.flip(o, 1, 'Blindaje'); if (r[0]) { t.dmg = this.hp(t) - 10; this.log(`Blindaje: ${this.nm(t)} resiste con 10 PS.`); continue; } }
         const fb = t.att.find(c => this.def(c).name === 'Focus Band');

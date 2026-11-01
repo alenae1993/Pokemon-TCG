@@ -36,7 +36,7 @@ function bestAttack(g, p, s, def, extraTok) {
   const e = g.eff(s); const tok = g.energyTokens(s).concat(extraTok || []);
   let best = null;
   e.atk.forEach((a, i) => {
-    const d = estDmg(g, s, def, a); const miss = deficit(tok, a.cost);
+    const d = estDmg(g, s, def, a); const miss = deficit(tok, g.attackCost ? g.attackCost(s, a) : a.cost);
     const v = { i, a, dmg: d, miss };
     if (!best || (miss === 0 && (best.miss > 0 || d > best.dmg)) || (miss > 0 && best.miss > 0 && (d - miss * 15 > best.dmg - best.miss * 15))) best = v;
   });

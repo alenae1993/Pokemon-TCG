@@ -9,7 +9,12 @@ const info = id => (P.MEGA_SETINFO || []).find(s => s.id === id) || {};
 const SETS = [
   { id: 'me01', name: 'Megaevolución', code: 'MEG', price: 150, tier: 0, era: 'mega', region: 'mega' },
   { id: 'me02', name: 'Fuegos Fantasmales', code: 'PFL', price: 160, tier: 1, era: 'mega', region: 'mega' },
+  { id: 'me02.5', name: 'Héroes Ascendentes', code: 'ASC', price: 220, tier: 4, era: 'mega', region: 'mega' },
+  { id: 'me03', name: 'Equilibrio Perfecto', code: 'POR', price: 170, tier: 2, era: 'mega', region: 'mega' },
+  { id: 'me05', name: 'Oscuridad Absoluta', code: 'PBL', price: 180, tier: 3, era: 'mega', region: 'mega' },
 ];
+const ALL_SETS = ['me01', 'me02', 'me02.5', 'me03', 'me05'];
+const SETS_BY_TIER = [['me01'], ['me01'], ['me01', 'me02', 'me03'], ['me01', 'me02', 'me03', 'me05'], ALL_SETS, ALL_SETS, ALL_SETS];
 // sobre moderno: 4 comunes, 3 infrecuentes, 2 "reversas" (cualquier rareza baja o ilustración) y 1 rara+
 const PACKS = {}; for (const s of SETS) PACKS[s.id] = { slots: [{ n: 4 }, { n: 3 }, { n: 2 }] };
 const pick = (a, rng) => a[Math.floor(rng() * a.length)];
@@ -48,19 +53,19 @@ function genDeck(cfg) {
   const allowEx = L >= 3 || (cfg.prefer || []).some(n => /ex$/.test(n));
   let ls = linesOf(pool).filter(l => [l.basic, ...l.s1, ...l.s2].some(d => d.types.some(t => types.includes(t))) || (cfg.prefer || []).some(n => [l.basic, ...l.s1, ...l.s2].some(d => d.name === n)));
   const top = l => { const c = [l.basic, ...l.s1, ...l.s2].filter(d => allowEx || !d.ex); return c.length ? c.sort((a, b) => power(b) - power(a))[0] : l.basic; };
-  const score = l => power(top(l)) + ((cfg.prefer || []).some(n => [l.basic, ...l.s1, ...l.s2].some(d => d.name === n)) ? 80 : 0) + (types.includes(top(l).types[0]) ? 10 : 0) + rng() * 12 - (L <= 2 && l.s2.length ? 15 : 0);
+  const score = l => power(top(l)) + (() => { const pr = cfg.prefer || []; const i = pr.findIndex(n => [l.basic, ...l.s1, ...l.s2].some(d => d.name === n)); return i < 0 ? 0 : 250 - 15 * i; })() + (types.includes(top(l).types[0]) ? 10 : 0) + rng() * 12 - (L <= 2 && l.s2.length ? 15 : 0);
   ls.sort((a, b) => score(b) - score(a));
   const deck = [], nc = {};
   const add = (d, n) => { for (let k = 0; k < n; k++) { if (!d || (nc[d.name] || 0) >= 4 || deck.length >= 60) return; nc[d.name] = (nc[d.name] || 0) + 1; deck.push(d.id); } };
   let poke = 0, nl = 0; const target = L <= 2 ? 18 : 16; let hasS2 = false, hasMega = false;
   for (const l of ls) {
-    if (poke >= target || nl >= (L <= 2 ? 4 : 3)) break;
+    if (poke >= target || (nl >= (L <= 2 ? 4 : 3) && poke >= 12) || nl >= 6) break;
     const s1 = l.s1.filter(d => allowEx || !d.ex).sort((a, b) => power(b) - power(a))[0];
     const s2 = l.s2.filter(d => (allowEx || !d.ex) && s1 && d.from === s1.name).sort((a, b) => power(b) - power(a))[0];
     const exB = allowEx && l.basic.ex;
     if (s2 && L >= 2) { add(l.basic, 4); add(s1, L >= 4 ? 2 : 3); add(s2, 3); poke += L >= 4 ? 9 : 10; hasS2 = true; }
     else if (s1) { add(l.basic, 4); add(s1, 3); poke += 7; }
-    else { add(l.basic, exB ? 2 : 3); poke += exB ? 2 : 3; }
+    else { const k = exB ? (L >= 4 ? 3 : 2) : 3; add(l.basic, k); poke += k; }
     if ([l.basic, s1, s2].some(d => d && d.mega && deck.includes(d.id))) hasMega = true;
     nl++;
   }
@@ -82,6 +87,21 @@ function genDeck(cfg) {
   if (t0 === 'D' && L >= 3) { push('Punk Helmet', 2); push('Risky Ruins', 1); }
   if (t0 === 'M' && L >= 2) push('Iron Defender', 2);
   if (L >= 3) push('Air Balloon', 1);
+  // cartas de las expansiones de la Fase 2 (sólo si el mazo usa esos sets)
+  const sets = cfg.sets || ['me01'];
+  const pushS = (n, k) => { const d = ALL().find(x => x.name === n && x.st === 'T' && official(x) && sets.includes(x.set)); if (d) for (let i = 0; i < k; i++) T.push(d.id); };
+  const named = pre => deck.filter(id => DBm(id).st === 'P' && DBm(id).name.indexOf(pre) === 0).length;
+  if (named("Team Rocket's") >= 6) { pushS("Team Rocket's Ariana", 2); pushS("Team Rocket's Transceiver", 2); pushS("Team Rocket's Proton", 1); pushS("Team Rocket's Factory", 1); pushS("Team Rocket's Petrel", 1); }
+  if (named("N's") >= 4) pushS("N's PP Up", 2);
+  if (L >= 2) { pushS('Poké Pad', 2); pushS('Cheren', 1); }
+  if (L <= 2) { pushS('Potion', 1); pushS('Energy Search', 1); }
+  if (L >= 3) { pushS('Pokémon Catcher', 1); pushS('Naveen', 1); pushS('Brave Bangle', 1); }
+  if (L >= 4) { pushS('Crushing Hammer', 2); pushS('Urbain', 1); }
+  if (L >= 5) { pushS('Judge', 1); pushS('Tool Scrapper', 1); }
+  if (t0 === 'P' && L >= 3) pushS('Jacinthe', 1);
+  if (t0 === 'F' && L >= 3) pushS('Tarragon', 1);
+  if (t0 === 'L' && L >= 3) pushS('Canari', 1);
+  if (t0 === 'D' && L >= 3) pushS('Dark Bell', 1);
   const eLeft = L <= 1 ? 18 : 14;
   for (const id of T) { const d = DBm(id); if (deck.length < 60 - eLeft && (nc[d.name] || 0) < 4) { nc[d.name] = (nc[d.name] || 0) + 1; deck.push(id); } }
   // energía
@@ -126,20 +146,34 @@ const TIERS = [
     { id: 'm_valerie', name: 'Líder Valeria', types: ['P'], portrait: 'me01-62', prefer: ['Mega Gardevoir ex', 'Kirlia', 'Alcremie'], quote: 'Mis Pokémon hada bailan para ti.' },
     { id: 'm_olympia', name: 'Líder Ástrid', types: ['P'], portrait: 'me01-56', prefer: ['Alakazam', 'Kadabra', 'Jynx'], quote: 'Ya vi tu derrota en las estrellas.' },
     { id: 'm_wulfric', name: 'Líder Édel', types: ['W'], portrait: 'me01-35', prefer: ['Mega Abomasnow ex', 'Frosmoth', 'Eiscue'], quote: '¡Ja! El hielo enfría la cabeza.' },
-    { id: 'm_flare', name: 'Lysson (Team Flare)', types: ['R'], portrait: 'me02-13', sets: ['me01', 'me02'], prefer: ['Mega Charizard X ex', 'Oricorio ex', 'Ceruledge'], quote: 'El mundo será hermoso... para unos pocos.' },
+    { id: 'm_flare', name: 'Lysson (Team Flare)', types: ['R'], portrait: 'me02-13', prefer: ['Mega Charizard X ex', 'Oricorio ex', 'Ceruledge'], quote: 'El mundo será hermoso... para unos pocos.' },
     { id: 'm_az', name: 'AZ', types: ['M'], portrait: 'me01-102', prefer: ['Mega Mawile ex', 'Bronzong', 'Dialga'], quote: 'Tres mil años esperando un combate así.' },
   ] },
   { name: 'Alto Mando', lv: 5, list: [
-    { id: 'm_malva', name: 'Malva', types: ['R'], portrait: 'me02-20', sets: ['me01', 'me02'], prefer: ['Mega Charizard X ex', 'Darmanitan', 'Reshiram'], quote: 'Tu derrota será la noticia del día.' },
-    { id: 'm_siebold', name: 'Narciso', types: ['W'], portrait: 'me01-38', sets: ['me01', 'me02'], prefer: ['Kyogre', 'Clawitzer', 'Inteleon'], quote: 'Cocino combates como platos de autor.' },
-    { id: 'm_wikstrom', name: 'Tileo', types: ['M'], portrait: 'me01-103', sets: ['me01', 'me02'], prefer: ['Mega Mawile ex', 'Empoleon ex', 'Archaludon'], quote: '¡Mi acero es inquebrantable!' },
-    { id: 'm_drasna', name: 'Drácena', types: ['D'], portrait: 'me02-58', sets: ['me01', 'me02'], prefer: ['Mega Gengar ex', 'Mega Sharpedo ex', 'Seviper'], quote: 'Oh, cariño, qué ternura de mazo.' },
-    { id: 'm_diantha', name: 'Campeona Dianta', types: ['P', 'D'], portrait: 'me01-60', sets: ['me01', 'me02'], prefer: ['Mega Gardevoir ex', 'Mega Absol ex', 'Mega Diancie ex'], champion: true, quote: 'Sobre este escenario, ¡brilla como un diamante!' },
+    { id: 'm_malva', name: 'Malva', types: ['R'], portrait: 'me02-20', prefer: ['Mega Charizard X ex', 'Darmanitan', 'Reshiram'], quote: 'Tu derrota será la noticia del día.' },
+    { id: 'm_siebold', name: 'Narciso', types: ['W'], portrait: 'me01-38', prefer: ['Kyogre', 'Clawitzer', 'Inteleon'], quote: 'Cocino combates como platos de autor.' },
+    { id: 'm_wikstrom', name: 'Tileo', types: ['M'], portrait: 'me01-103', prefer: ['Mega Mawile ex', 'Empoleon ex', 'Archaludon'], quote: '¡Mi acero es inquebrantable!' },
+    { id: 'm_drasna', name: 'Drácena', types: ['D'], portrait: 'me02-58', prefer: ['Mega Gengar ex', 'Mega Sharpedo ex', 'Seviper'], quote: 'Oh, cariño, qué ternura de mazo.' },
+    { id: 'm_diantha', name: 'Campeona Dianta', types: ['P', 'D'], portrait: 'me01-60', prefer: ['Mega Gardevoir ex', 'Mega Absol ex', 'Mega Diancie ex'], champion: true, quote: 'Sobre este escenario, ¡brilla como un diamante!' },
+  ] },
+  { name: 'Héroes Ascendentes', lv: 5, list: [
+    { id: 'm_erika', name: 'Erika', types: ['G'], prefer: ["Erika's Vileplume ex", "Erika's Gloom", "Erika's Oddish", "Erika's Tangela", "Erika's Victreebel"], quote: 'Las flores también saben pelear... con elegancia.' },
+    { id: 'm_ethan', name: 'Eco', types: ['R'], prefer: ["Ethan's Ho-Oh ex", "Ethan's Magcargo", "Ethan's Slugma", "Ethan's Typhlosion"], quote: '¡Mi Ho-Oh y yo hemos cruzado todo Johto!' },
+    { id: 'm_iono', name: 'E-Nigma', types: ['L'], prefer: ["Iono's Bellibolt ex", "Iono's Tadbulb", "Iono's Kilowattrel", "Iono's Wattrel"], quote: '¡Hola, hola, mis electrizantes seguidores!' },
+    { id: 'm_lillie', name: 'Lylia', types: ['P'], prefer: ["Lillie's Clefairy ex", "Lillie's Ribombee", "Lillie's Cutiefly", 'Mega Clefable ex'], quote: '¡Hoy daré lo mejor de mí, Nebulilla!' },
+    { id: 'm_hop', name: 'Paul', types: ['L', 'P'], prefer: ["Hop's Pincurchin ex", "Hop's Trevenant", "Hop's Phantump", "Hop's Cramorant"], quote: '¡Voy a ser el mejor entrenador, como mi hermano!' },
+  ] },
+  { name: 'Leyendas', lv: 5, list: [
+    { id: 'm_n', name: 'N', types: ['D', 'R'], prefer: ["N's Zoroark ex", "N's Zorua", "N's Darmanitan", "N's Darumaka", "N's Vanilluxe"], quote: 'Quiero oír la voz de tus Pokémon.' },
+    { id: 'm_larry', name: 'Laureano', types: ['C'], prefer: ["Larry's Dudunsparce ex", "Larry's Dunsparce", "Larry's Staraptor", "Larry's Komala"], quote: 'Un combate más antes de ir a comer...' },
+    { id: 'm_rocket', name: 'Giovanni (Team Rocket)', types: ['P', 'D'], prefer: ["Team Rocket's Mewtwo ex", "Team Rocket's Kangaskhan ex", "Team Rocket's Spidops", "Team Rocket's Tarountula", "Team Rocket's Murkrow", "Team Rocket's Honchkrow"], quote: 'El Team Rocket nunca pierde dos veces.' },
+    { id: 'm_cynthia', name: 'Cintia', types: ['F'], prefer: ["Cynthia's Garchomp ex", "Cynthia's Gabite", "Cynthia's Gible", "Cynthia's Spiritomb"], quote: 'Muéstrame la fuerza que has reunido.' },
+    { id: 'm_darkrai', name: 'Sombra de Darkrai', types: ['D', 'P'], prefer: ['Mega Darkrai ex', 'Mega Chandelure ex', 'Lampent', 'Litwick'], quote: '...la oscuridad absoluta te envuelve.' },
   ] },
 ];
 const findId = n => { const d = n && ALL().find(c => c.name === n && official(c)); return d ? d.id : null; };
 const bestOf = (types, sets) => { const l = ALL().filter(d => d.st === 'P' && official(d) && sets.includes(d.set) && types.includes(d.types[0])).sort((a, b) => power(b) - power(a)); return l.length ? l[Math.min(l.length - 1, 2)].id : 'me01-1'; };
-TIERS.forEach((t, i) => t.list.forEach(x => { x.tier = i; x.level = t.lv; x.sets = x.sets || (i >= 2 ? ['me01', 'me02'] : ['me01']); x.portrait = findId((x.prefer || [])[0]) || bestOf(x.types, x.sets); }));
+TIERS.forEach((t, i) => t.list.forEach(x => { x.tier = i; x.level = t.lv; x.sets = x.sets || SETS_BY_TIER[i] || ALL_SETS; x.portrait = findId((x.prefer || [])[0]) || bestOf(x.types, x.sets); }));
 STARTERS.forEach(s => { s.cover = findId(s.prefer[0]); });
 const TRAINERS = TIERS.flatMap(t => t.list);
 function trainerDeck(t, rng) { return genDeck({ types: t.types, sets: t.sets, level: t.level, rng, prefer: t.prefer }); }

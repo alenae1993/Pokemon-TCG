@@ -39,7 +39,7 @@ async function toHand(g, p, filter, max, title, purpose) {
   if (sel.length) g.log(`${p.name} pone ${sel.map(c => g.cn(c)).join(', ')} en su mano.`); else g.log(`${p.name} no encontró cartas.`);
   return sel;
 }
-async function benchCard(g, p, c) { const s = g.mkSlot(p, c); p.bench.push(s); g.log(`${p.name} pone a ${g.cn(c)} en su Banca.`); await HOOKS.onBench(g, p, s); return s; }
+async function benchCard(g, p, c) { const s = g.mkSlot(p, c); p.bench.push(s); g.log(`${p.name} pone a ${g.cn(c)} en su Banca.`); await HOOKS.onBench(g, p, s, true); return s; }
 async function toBench(g, p, filter, max, title) {
   const room = benchRoom(g, p); if (room <= 0) { g.shuffleDeck(p); return []; }
   const sel = await search(g, p, filter, Math.min(max, room), title, { purpose: 'searchBasic' });
@@ -331,6 +331,355 @@ function bossValue(g, p) {
   return t ? 13 + g.baseDef(t).prizes * 2 : 0;
 }
 
+// ================= FASE 2: Héroes Ascendentes, Equilibrio Perfecto, Oscuridad Absoluta =================
+const named = (g, s, pre) => !!s && g.eff(s).name.indexOf(pre) === 0;
+const countNamed = (g, p, pre) => g.slots(p).filter(s => named(g, s, pre)).length;
+const ruleBox = (g, s) => !!(s && g.baseDef(s).ex);
+const isTera = (g, s) => !!(s && g.baseDef(s).tera);
+const toolOn = (g, s, n) => !!s && !g.stadiumIs('Jamming Tower') && s.att.some(c => def(g, c).name === n);
+const toolsOf = (g, s) => s.att.filter(c => (def(g, c).sub || []).includes('Pokémon Tool'));
+const hasSC = s => !!(s && (s.st || s.poison || s.burn));
+const isEvo = (g, s) => !!s && g.baseDef(s).st === 'P' && g.baseDef(s).stage > 0;
+const hideCount = (g, p) => p.discard.filter(c => { const d = def(g, c); return d.st === 'P' && d.pw && d.pw.name === "M:Hide 'n' Sneak"; }).length;
+const canHit = (x, t) => t && x.g.allSlots().includes(t) && !t.fx.immune && !x.g.effectsBlocked(t, x.me) && !x.immune.has(t.u);
+const drawN = (g, p, n) => { const k = g.draw(p, n); g.log(`${p.name} roba ${k} carta(s).`); return k; };
+const drawTo = (g, p, n) => { const k = n - p.hand.length; if (k > 0) drawN(g, p, k); };
+const COPY = new Set(['Metronome', 'Gemstone Mimicry', 'Night Joker', 'Skill Thief']);
+async function useAttackOf(x, list, title) {
+  const atks = list.filter(a => !COPY.has(a.name)); if (!atks.length) { x.dmg = 0; return; }
+  const i = atks.length === 1 ? 0 : await x.g.ask(x.me, { kind: 'option', title, options: atks.map(a => `${a.nameEs} (${a.dmg || '—'})`), atks, purpose: 'copyAttack' });
+  const a = atks[i] || atks[0]; x.g.log(`Usa ${a.nameEs}.`);
+  x.atk = a; x.dmg = x.base = parseInt(a.dmg) || 0; const F = FX.atk[a.fx]; if (F && F.f) await F.f(x);
+}
+async function snipeAny(x, n) { const t = await x.chooseOpp('all', `Elige a qué Pokémon rival haces ${n} de daño`); if (!t) { x.dmg = 0; return; } if (t === x.op.active) x.dmg = n; else { x.dmg = 0; x.target = null; x.dmgTo(t, n); } }
+const discSnipe = (k, n) => ({ f: async x => { await discardSelfEnergy(x, k); await snipeAny(x, n); }, ...est(() => n) });
+const alsoBench = n => ({ f: async x => { const t = await x.chooseOpp('bench', `Elige un Pokémon en Banca del rival (${n} de daño)`); if (t) x.dmgTo(t, n); } });
+const perEnergy = (t, n, base) => ({ f: async x => { x.dmg += n * tokensOf(x.g, x.att, t); }, ...est((g, s) => base + n * tokensOf(g, s, t)) });
+const ifEx = (n, base) => ({ f: async x => { if (isEx(x.g, x.def)) x.dmg += n; }, ...est((g, s, d) => base + (isEx(g, d) ? n : 0)) });
+const ifDamaged = (n, base) => ({ f: async x => { if (x.def && x.def.dmg > 0) x.dmg += n; }, ...est((g, s, d) => base + (d && d.dmg > 0 ? n : 0)) });
+const ifSelfDamaged = (n, base) => ({ f: async x => { if (x.att.dmg > 0) x.dmg += n; }, ...est((g, s) => base + (s.dmg > 0 ? n : 0)) });
+const coinPlus = (n, base) => ({ f: async x => { if (await x.flip1()) x.dmg += n; }, ...est(() => base + n / 2) });
+const flipPerEnergy = (n, type) => ({ f: async x => { const k = type ? tokensOf(x.g, x.att, type) : x.g.energyTokens(x.att).length; x.dmg = n * await x.flip(k); }, ...est((g, s) => n * (type ? tokensOf(g, s, type) : g.energyTokens(s).length) / 2) });
+const regiCharge = t => ({ f: async x => { const g = x.g, p = x.me; const cs = p.discard.filter(c => isBasicE(g, c, t)); if (!cs.length) return; const sel = cs.length <= 2 ? cs : await g.ask(p, { kind: 'cards', title: `Elige hasta 2 Energías ${TYN[t]} básicas`, cards: cs, min: 0, max: 2, purpose: 'getEnergy' }); for (const c of sel) { g.removeFrom(p.discard, c); attachCard(g, p, c, x.att); } } });
+const shield = k => ({ f: async x => x.post(() => x.mark(x.att, k)) });
+const cancelUnless = (cond, n) => ({ f: async x => { if (!cond(x)) x.cancel(); }, ...est((g, s, d, a) => n(g, s, d) ? (parseInt(a.dmg) || 0) : 0) });
+const anyNum = (title, filt) => async (g, p, max, purpose) => { const cs = p.hand.filter(c => filt(g, c)); if (!cs.length) return []; return g.ask(p, { kind: 'cards', title, cards: cs, min: 0, max: Math.min(max, cs.length), purpose }); };
+async function discardHandEnergy(x, max, filt, per, title) { const g = x.g; const cs = x.me.hand.filter(c => filt(g, c)); if (!cs.length) return 0; const need = x.def ? g.hpLeft(x.def) - x.dmg : 999; const want = Math.min(max, Math.max(0, Math.ceil(need / per))); const sel = await g.ask(x.me, { kind: 'cards', title, cards: cs, min: 0, max: Math.min(max, cs.length), purpose: 'infernoX', want }); for (const c of sel) { g.removeFrom(x.me.hand, c); g.toDiscard(c); } if (sel.length) g.log(`${x.me.name} descarta ${sel.length} carta(s) de su mano.`); return sel.length; }
+function randomDiscard(g, o) { if (!o.hand.length) return null; const i = Math.floor(g.rnd() * o.hand.length); const c = o.hand.splice(i, 1)[0]; o.discard.push(c); g.log(`Se descarta ${g.cn(c)} al azar de la mano de ${o.name}.`); return c; }
+const koLast = (g, p, pre) => { const k = p.koList; return !!(k && k.t === g.turnNo - 1 && (!pre || k.n.some(n => n.indexOf(pre) === 0))); };
+async function counters(x, t, n) { x.post(() => { if (canHit(x, t)) placeCounters(x.g, t, n, x.me); }); }
+function koNow(g, t, why) { t.dmg = Math.max(t.dmg, g.hp(t)); g.log(`${g.nm(t)} queda Fuera de Combate${why ? ' (' + why + ')' : ''}.`); }
+function attachSearchEnergy(g, p, filter, max, targets, title) { return (async () => { const sel = await search(g, p, filter, max, title, { purpose: 'getEnergy' }); await attachSpread(g, p, sel, targets, title); return sel; })(); }
+
+A(`This attack does 40 damage for each of your Erika's Pokémon in play.`, { f: async x => { x.dmg = 40 * countNamed(x.g, x.me, "Erika's"); }, ...est((g, s) => 40 * countNamed(g, g.ownerOf(s), "Erika's")) });
+A(`This attack does 50 more damage for each {G} Energy attached to this Pokémon.`, perEnergy('G', 50, 70));
+A(`Your opponent reveals their hand, and this attack does 80 damage for each Energy card you find there.`, { f: async x => { const n = x.op.hand.filter(c => x.g.isEnergy(c)).length; x.g.log(`${x.op.name} muestra su mano: ${n} carta(s) de Energía.`); x.dmg = 80 * n; }, ...est(() => 80) });
+A(`During your opponent's next turn, they can't play any Item cards from their hand.`, { f: async x => x.post(() => { x.op.flags.noItem = { until: x.g.turnNo + 1 }; x.g.log(`${x.op.name} no podrá jugar cartas de Objeto en su próximo turno.`); }) });
+A(`This attack does 30 damage for each of your Team Rocket's Pokémon in play.`, { f: async x => { x.dmg = 30 * countNamed(x.g, x.me, "Team Rocket's"); }, ...est((g, s) => 30 * countNamed(g, g.ownerOf(s), "Team Rocket's")) });
+A(`Discard 3 Energy from this Pokémon, and this attack does 280 damage to 1 of your opponent's Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, discSnipe(3, 280));
+A(`Discard up to 5 {R} Energy from this Pokémon. This attack does 70 damage for each card you discarded in this way.`, { f: async x => { const g = x.g; const cs = g.energyCardsOf(x.att, 'R'); if (!cs.length) { x.dmg = 0; return; } const want = x.def ? Math.min(5, Math.ceil(g.hpLeft(x.def) / ((g.eff(x.def).weak === 'R') ? 140 : 70))) : 5; const sel = await g.ask(x.me, { kind: 'cards', title: 'Elige hasta 5 Energías Fuego para descartar (70 de daño cada una)', cards: cs, min: 0, max: Math.min(5, cs.length), purpose: 'infernoX', want, slot: x.att }); for (const c of sel) { g.removeFrom(x.att.energy, c); g.toDiscard(c); } x.dmg = 70 * sel.length; }, ...est((g, s) => 70 * Math.min(5, g.energyCardsOf(s, 'R').length)) });
+A(`If you have at least 4 {R} Energy in play, this attack does 90 more damage.`, { f: async x => { if (energyInPlay(x.g, x.me, 'R') >= 4) x.dmg += 90; }, ...est((g, s) => 30 + (energyInPlay(g, g.ownerOf(s), 'R') >= 4 ? 90 : 0)) });
+A(`Heal 50 damage from each of your Pokémon.`, { f: async x => x.post(() => { for (const s of x.g.slots(x.me)) x.heal(s, 50); }) });
+A(`If your opponent's Active Pokémon isn't Burned, this attack does nothing.`, cancelUnless(x => x.def && x.def.burn, (g, s, d) => d && d.burn));
+A(`This attack does 30 damage for each Basic Energy card in your opponent's discard pile.`, { f: async x => { x.dmg = 30 * x.op.discard.filter(c => isBasicE(x.g, c)).length; }, ...est((g, s) => 30 * g.opp(g.ownerOf(s)).discard.filter(c => isBasicE(g, c)).length) });
+A(`Discard all Energy from this Pokémon, and this attack also does 90 damage to 1 of your opponent's Benched Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { const t = await x.chooseOpp('bench', 'Elige un Pokémon en Banca del rival (90 de daño)'); if (t) x.dmgTo(t, 90); FX.atk['M|Discard all Energy from this Pokémon.'].f(x); } });
+A(`Your opponent discards a card from their hand. If this Pokémon evolved from Salandit during this turn, your opponent discards 2 more cards.`, { f: async x => x.post(async () => { const g = x.g, o = x.op, s = x.att; const n = (s.evolved === g.turnNo && s.cards.length > 1 && def(g, s.cards[s.cards.length - 2]).name === 'Salandit') ? 3 : 1; const k = Math.min(n, o.hand.length); if (!k) return; const sel = await g.ask(o, { kind: 'cards', title: `Descarta ${k} carta(s) de tu mano`, cards: o.hand.slice(), min: k, max: k, purpose: 'discardHand' }); for (const c of sel) { g.removeFrom(o.hand, c); o.discard.push(c); } g.log(`${o.name} descarta ${sel.map(c => g.cn(c)).join(', ')}.`); }) });
+A(`Flip a coin. If heads, this attack does 10 more damage.`, coinPlus(10, 10));
+for (const n of ['Flare Strike', 'Frosty Typhoon', 'Impact Blow', 'Dragon Strike', 'Dark Strike']) A(`During your next turn, this Pokémon can't use ${n}.`, noRepeat);
+A(`This attack does 180 damage to 1 of your opponent's Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, anyOpp(180));
+A(`This attack does 20 more damage for each {W} Energy attached to this Pokémon.`, perEnergy('W', 20, 60));
+A(`Flip a coin. If heads, discard an Energy from your opponent's Active Pokémon.`, { f: async x => { if (await x.flip1() && x.def) x.post(() => x.discardOppEnergy(x.def, 1)); } });
+A(`If your opponent's Active Pokémon already has any damage counters on it, this attack does 200 more damage.`, ifDamaged(200, 200));
+A(`Discard all Energy from this Pokémon. Your opponent's Active Pokémon is now Paralyzed.`, { f: async x => { FX.atk['M|Discard all Energy from this Pokémon.'].f(x); x.status(x.def, 'paralyzed'); } });
+A(`This attack does 50 damage for each card in your opponent's hand.`, { f: async x => { x.dmg = 50 * x.op.hand.length; }, ...est((g, s) => 50 * g.opp(g.ownerOf(s)).hand.length) });
+A(`Your opponent's Active Pokémon is now Asleep.`, { f: async x => x.status(x.def, 'asleep') });
+A(`Attach up to 2 Basic {W} Energy cards from your discard pile to this Pokémon.`, regiCharge('W'));
+A(`Attach up to 2 Basic {F} Energy cards from your discard pile to this Pokémon.`, regiCharge('F'));
+A(`Attach up to 2 Basic {M} Energy cards from your discard pile to this Pokémon.`, regiCharge('M'));
+A(`Discard 2 Energy from this Pokémon, and your opponent's Active Pokémon is now Paralyzed.`, { f: async x => { x.post(() => discardSelfEnergy(x, 2)); x.status(x.def, 'paralyzed'); } });
+A(`During your opponent's next turn, the Defending Pokémon can't use attacks.`, { f: async x => x.markPost(x.def, 'cantAttack') });
+A(`Double the number of damage counters on each of your opponent's Pokémon.`, { f: async x => x.post(() => { for (const t of x.g.slots(x.op)) if (t.dmg > 0 && canHit(x, t)) { const n = t.dmg / 10; placeCounters(x.g, t, n, x.me); } }), ...est(g => 0) });
+A(`This attack also does 10 damage to each of your opponent's Benched Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => x.benchDmg(x.op, 10) });
+A(`Move a {W} Energy from this Pokémon to 1 of your Benched Pokémon.`, { f: async x => x.post(async () => { const g = x.g, p = x.me; const cs = g.energyCardsOf(x.att, 'W'); if (!p.bench.length || !cs.length || !g.slots(p).includes(x.att)) return; const c = cs[0]; const t = await g.ask(p, { kind: 'slot', title: '¿A qué Pokémon en Banca mueves la Energía Agua?', options: p.bench.slice(), purpose: 'energyTarget', card: c }); g.removeFrom(x.att.energy, c); (t || p.bench[0]).energy.push(c); g.log(`${g.cn(c)} pasa a ${g.nm(t || p.bench[0])}.`); }) });
+A(`Flip a coin. If heads, this attack does 50 more damage.`, coinPlus(50, 20));
+A(`Discard a {L} Energy from this Pokémon.`, { f: async x => x.post(() => discardSelfEnergy(x, 1, 'L')) });
+A(`Discard 3 Energy from this Pokémon.`, { f: async x => x.post(() => discardSelfEnergy(x, 3)) });
+A(`Flip a coin until you get tails. This attack does 100 more damage for each heads.`, { f: async x => { x.dmg += 100 * await x.flipUntilTails(); }, ...est(() => 200) });
+A(`This attack does 60 damage to each of 2 of your opponent's Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { const g = x.g; const all = g.slots(x.op); let ts = all; if (all.length > 2) ts = await g.ask(x.me, { kind: 'slots', title: 'Elige 2 Pokémon del rival (60 de daño a cada uno)', options: all, min: 2, max: 2, purpose: 'damageOpp' }); x.dmg = 0; x.target = null; for (const t of ts) { if (t === x.op.active) { x.target = t; x.dmg = 60; } else x.dmgTo(t, 60); } }, ...est(() => 60) });
+A(`You may discard 2 {L} Energy from this Pokémon and make your opponent's Active Pokémon Paralyzed.`, { f: async x => { if (x.g.energyCardsOf(x.att, 'L').length >= 2 && await x.g.ask(x.me, { kind: 'yesno', title: '¿Descartar 2 Energías Rayo para Paralizar al Pokémon Activo rival?', purpose: 'voltaic', want: x.def && x.g.hpLeft(x.def) > 190 })) { x.post(() => discardSelfEnergy(x, 2, 'L')); x.status(x.def, 'paralyzed'); } } });
+A(`During your opponent's next turn, the Defending Pokémon can't retreat. During your next turn, the Defending Pokémon takes 100 more damage from attacks (after applying Weakness and Resistance).`, { f: async x => { x.markPost(x.def, 'noRetreat'); x.markPost(x.def, 'vuln', 100, 2); } });
+A(`Flip a coin for each Energy attached to this Pokémon. This attack does 70 damage for each heads.`, flipPerEnergy(70));
+A(`Flip a coin for each Energy attached to this Pokémon. This attack does 80 damage for each heads.`, flipPerEnergy(80));
+A(`Flip a coin for each {W} Energy attached to this Pokémon. This attack does 90 damage for each heads.`, flipPerEnergy(90, 'W'));
+A(`Switch this Pokémon with 1 of your Benched {L} Pokémon.`, { f: async x => x.post(async () => { const g = x.g, p = x.me; const opts = p.bench.filter(b => hasType(g, b, 'L')); if (p.active !== x.att || !opts.length) return; const t = await g.ask(p, { kind: 'slot', title: 'Elige un Pokémon Rayo en Banca', options: opts, purpose: 'swapTo' }); await g.switchActive(p, t || opts[0], 'force'); }) });
+A(`If you go first, you can use this attack during your first turn. Discard your hand and draw 5 cards.`, { firstTurn: true, f: async x => { const g = x.g, p = x.me; for (const c of p.hand.splice(0)) p.discard.push(c); drawN(g, p, 5); } });
+A(`During your next turn, this Pokémon can't attack.`, { f: async x => x.post(() => { if (x.g.slots(x.me).includes(x.att)) x.mark(x.att, 'cantAttack', true, 2); }) });
+A(`If your opponent's Active Pokémon is a Pokémon ex, this attack does 120 more damage.`, ifEx(120, 120));
+A(`If your opponent's Active Pokémon is a Pokémon ex, this attack does 80 more damage.`, ifEx(80, 80));
+A(`Choose 1 of your opponent's Active Pokémon's attacks and use it as this attack.`, { f: async x => { if (!x.def) return; await useAttackOf(x, x.g.eff(x.def).atk, 'Metrónomo: elige el ataque a copiar'); }, ...est((g, s, d) => d ? Math.max(0, ...g.eff(d).atk.map(a => parseInt(a.dmg) || 0)) : 0) });
+A(`Choose 1 of your opponent's Active Tera Pokémon's attacks and use it as this attack.`, { f: async x => { if (!isTera(x.g, x.def)) { x.dmg = 0; return; } await useAttackOf(x, x.g.eff(x.def).atk, 'Mimetismo Gema: elige el ataque a copiar'); }, ...est((g, s, d) => isTera(g, d) ? Math.max(0, ...g.eff(d).atk.map(a => parseInt(a.dmg) || 0)) : 0) });
+A(`Choose 1 of your Benched N's Pokémon's attacks and use it as this attack.`, { f: async x => { const list = []; for (const b of x.me.bench) if (named(x.g, b, "N's")) list.push(...x.g.eff(b).atk); await useAttackOf(x, list, 'Comodín Nocturno: elige el ataque a usar'); }, ...est((g, s) => Math.max(0, ...g.ownerOf(s).bench.filter(b => named(g, b, "N's")).flatMap(b => g.eff(b).atk.map(a => parseInt(a.dmg) || 0)))) });
+A(`If you have no cards in your hand, choose an attack from 1 of your opponent's Pokémon in play and use it as this attack.`, { f: async x => { if (x.me.hand.length) { x.dmg = 0; return; } const list = []; for (const t of x.g.slots(x.op)) if (x.g.baseDef(t).st === 'P') list.push(...x.g.eff(t).atk); await useAttackOf(x, list, 'Ladrón de Técnicas: elige el ataque a usar'); }, ...est((g, s) => g.ownerOf(s).hand.length ? 0 : 100) });
+A(`This attack does 20 more damage for each Benched Pokémon (both yours and your opponent's).`, { f: async x => { x.dmg += 20 * (x.me.bench.length + x.op.bench.length); }, ...est((g, s) => 20 + 20 * (g.ownerOf(s).bench.length + g.opp(g.ownerOf(s)).bench.length)) });
+A(`Flip 3 coins. If all of them are heads, Knock Out 1 of your opponent's Pokémon.`, { f: async x => { if (await x.flip(3) < 3) return; const t = await x.chooseOpp('all', 'Elige el Pokémon rival que queda Fuera de Combate', 'bounceOpp'); x.post(() => { if (canHit(x, t)) koNow(x.g, t, 'Trikinesis'); }); } });
+A(`This Pokémon also does 30 damage to itself.`, { f: async x => x.selfDmg(30) });
+A(`This Pokémon also does 50 damage to itself.`, { f: async x => x.selfDmg(50) });
+A(`You may discard up to 2 Energy from your Benched Pokémon. This attack does 60 more damage for each card you discarded in this way.`, { f: async x => { const g = x.g, p = x.me; const all = []; for (const b of p.bench) for (const c of b.energy) all.push([c, b]); if (!all.length) return; const need = x.def ? g.hpLeft(x.def) - x.dmg : 0; const want = Math.min(2, Math.max(0, Math.ceil(need / 60))); const sel = await g.ask(p, { kind: 'cards', title: 'Elige hasta 2 Energías de tu Banca para descartar (+60 cada una)', cards: all.map(a => a[0]), min: 0, max: Math.min(2, all.length), purpose: 'infernoX', want }); for (const c of sel) { const b = all.find(a => a[0] === c)[1]; g.removeFrom(b.energy, c); g.toDiscard(c); } x.dmg += 60 * sel.length; }, ...est((g, s) => 160 + 60 * Math.min(2, g.ownerOf(s).bench.reduce((a, b) => a + b.energy.length, 0))) });
+A(`This attack does 40 more damage for each {P} Energy attached to this Pokémon.`, perEnergy('P', 40, 60));
+A(`Search your deck for a card that evolves from this Pokémon and put it onto this Pokémon to evolve it. Then, shuffle your deck.`, { f: async x => x.post(async () => { if (x.g.slots(x.me).includes(x.att)) await x.g.evolveFromDeck(x.me, x.att, null, 'Ascensión: elige la evolución'); }) });
+A(`If your opponent's Active Pokémon is affected by a Special Condition, place 6 damage counters on 1 of your opponent's Benched Pokémon.`, { f: async x => { if (!hasSC(x.def)) return; const t = await x.chooseOpp('bench', 'Elige un Pokémon en Banca del rival (6 contadores)', 'curseTo'); if (t) counters(x, t, 6); } });
+A(`Your opponent chooses 3 cards from their hand and shuffles those cards into their deck.`, { f: async x => x.post(async () => { const g = x.g, o = x.op; const k = Math.min(3, o.hand.length); if (!k) return; const sel = await g.ask(o, { kind: 'cards', title: `Elige ${k} carta(s) de tu mano para barajar en tu mazo`, cards: o.hand.slice(), min: k, max: k, purpose: 'discardHand' }); for (const c of sel) { g.removeFrom(o.hand, c); o.deck.push(c); } g.shuffleDeck(o); g.log(`${o.name} baraja ${k} carta(s) de su mano en su mazo.`); }) });
+A(`You may search your deck for any number of Pokémon that have "{S}" in their name and put them onto your Bench. Then, shuffle your deck.`, { f: async x => { await toBench(x.g, x.me, c => isBasicMon(x.g, c) && def(x.g, c).name.includes('Rotom'), 5, 'Busca Pokémon Rotom para tu Banca'); } });
+A(`This attack does 30 damage for each Pokémon Tool attached to all of your Pokémon.`, { f: async x => { x.dmg = 30 * x.g.slots(x.me).reduce((a, s) => a + toolsOf(x.g, s).length, 0); }, ...est((g, s) => 30 * g.slots(g.ownerOf(s)).reduce((a, t) => a + toolsOf(g, t).length, 0)) });
+A(`If any of your Hop's Pokémon were Knocked Out by damage from an attack during your opponent's last turn, this attack does 100 more damage.`, { f: async x => { if (koLast(x.g, x.me, "Hop's")) x.dmg += 100; }, ...est((g, s) => 30 + (koLast(g, g.ownerOf(s), "Hop's") ? 100 : 0)) });
+A(`Discard all Energy from this Pokémon and place 12 damage counters on 1 of your opponent's Pokémon.`, { f: async x => { const t = await x.chooseOpp('all', 'Elige dónde poner 12 contadores de daño', 'curseTo'); FX.atk['M|Discard all Energy from this Pokémon.'].f(x); if (t) counters(x, t, 12); }, ...est(() => 120) });
+A(`Flip a coin until you get tails. For each heads, discard the top card of your opponent's deck.`, { f: async x => { const h = await x.flipUntilTails(); if (h) x.post(() => discardTop(x.g, x.op, h)); } });
+A(`Shuffle your hand into your deck. Then, draw 6 cards.`, { f: async x => { const g = x.g, p = x.me; p.deck.push(...p.hand.splice(0)); g.shuffleDeck(p); drawN(g, p, 6); } });
+A(`If you don't have exactly 7 cards in your hand, this attack does nothing.`, cancelUnless(x => x.me.hand.length === 7, (g, s) => g.ownerOf(s).hand.length === 7));
+A(`If your opponent's Active Pokémon is a Stage 2 Pokémon, this attack does 140 more damage.`, { f: async x => { if (x.def && x.g.baseDef(x.def).stage === 2) x.dmg += 140; }, ...est((g, s, d) => 140 + (d && g.baseDef(d).stage === 2 ? 140 : 0)) });
+A(`If this Pokémon has any damage counters on it, this attack does 100 more damage.`, ifSelfDamaged(100, 100));
+A(`If a Stadium is in play, this attack does 140 more damage. Then, discard that Stadium.`, { f: async x => { const g = x.g; if (g.stadium) { x.dmg += 140; x.post(() => { if (g.stadium) { g.log(`Se descarta ${g.cn(g.stadium)}.`); g.toDiscard(g.stadium); g.stadium = null; } }); } }, ...est(g => 120 + (g.stadium ? 140 : 0)) });
+A(`If your opponent has 2 or fewer Prize cards remaining, this attack does 100 more damage.`, { f: async x => { if (x.op.prizes.length <= 2) x.dmg += 100; }, ...est((g, s) => 70 + (g.opp(g.ownerOf(s)).prizes.length <= 2 ? 100 : 0)) });
+A(`During your opponent's next turn, this Pokémon takes 20 less damage from attacks (after applying Weakness and Resistance).`, { f: async x => x.post(() => x.mark(x.att, 'reduce', 20)) });
+A(`During your opponent's next turn, this Pokémon takes 50 less damage from attacks (after applying Weakness and Resistance).`, { f: async x => x.post(() => x.mark(x.att, 'reduce', 50)) });
+A(`This attack does 140 damage to 1 of your opponent's Pokémon. If you don't have 10 or more Basic {F} Energy cards in your discard pile, this attack does nothing. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { if (x.me.discard.filter(c => isBasicE(x.g, c, 'F')).length < 10) { x.cancel(); return; } await snipeAny(x, 140); }, ...est((g, s) => g.ownerOf(s).discard.filter(c => isBasicE(g, c, 'F')).length >= 10 ? 140 : 0) });
+A(`If any of your Pokémon were Knocked Out by damage from an attack during your opponent's last turn, this attack does 120 more damage.`, { f: async x => { if (x.me.flags.koByAtk === x.g.turnNo - 1) x.dmg += 120; }, ...est((g, s) => 50 + (g.ownerOf(s).flags.koByAtk === g.turnNo - 1 ? 120 : 0)) });
+A(`This attack does 60 more damage for each Prize card your opponent took during their last turn.`, { f: async x => { if (x.op.prizeT === x.g.turnNo - 1) x.dmg += 60 * (x.op.prizeN || 0); }, ...est((g, s) => { const o = g.opp(g.ownerOf(s)); return 80 + (o.prizeT === g.turnNo - 1 ? 60 * (o.prizeN || 0) : 0); }) });
+A(`Choose 1 of your opponent's Active Pokémon's attacks. During your opponent's next turn, that Pokémon can't use that attack.`, { f: async x => { if (!x.def) return; const atks = x.g.eff(x.def).atk; if (!atks.length) return; const i = atks.length === 1 ? 0 : await x.g.ask(x.me, { kind: 'option', title: 'Tormento: elige el ataque que bloqueas', options: atks.map(a => a.nameEs), atks, purpose: 'blockAttack' }); x.markPost(x.def, 'noAtk', (atks[i] || atks[0]).name); } });
+A(`You may discard any number of Supporter cards that have "Team Rocket" in their name from your hand, and this attack does 60 damage for each card you discarded in this way.`, { f: async x => { x.dmg = 0; const n = await discardHandEnergy(x, 10, (g, c) => (def(g, c).sub || []).includes('Supporter') && def(g, c).name.includes('Team Rocket'), 60, 'Descarta Partidarios del Team Rocket (60 de daño cada uno)'); x.dmg = 60 * n; }, ...est((g, s) => 60 * g.ownerOf(s).hand.filter(c => (def(g, c).sub || []).includes('Supporter') && def(g, c).name.includes('Team Rocket')).length) });
+A(`This attack does 70 damage for each damage counter on your opponent's Active Pokémon.`, { f: async x => { x.dmg = x.def ? 7 * x.def.dmg : 0; }, ...est((g, s, d) => d ? 7 * d.dmg : 0) });
+A(`This attack does 10 damage for each damage counter on all of your Benched Cynthia's Pokémon. This attack's damage isn't affected by Weakness.`, { f: async x => { x.weak = false; x.dmg = x.me.bench.filter(b => named(x.g, b, "Cynthia's")).reduce((a, b) => a + b.dmg, 0); }, ...est((g, s) => g.ownerOf(s).bench.filter(b => named(g, b, "Cynthia's")).reduce((a, b) => a + b.dmg, 0)) });
+A(`Discard a random card from your opponent's hand.`, { f: async x => x.post(() => randomDiscard(x.g, x.op)) });
+A(`Discard a random card from your opponent's hand. Discard the top card of your opponent's deck.`, { f: async x => x.post(() => { randomDiscard(x.g, x.op); discardTop(x.g, x.op, 1); }) });
+A(`This attack does 50 damage to 1 of your opponent's Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, anyOpp(50));
+A(`This attack does 100 damage to 1 of your opponent's Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, anyOpp(100));
+A(`If any of your Benched Pancham have any damage counters on them, this attack does 120 more damage.`, { f: async x => { if (x.me.bench.some(b => x.g.eff(b).name === 'Pancham' && b.dmg > 0)) x.dmg += 120; }, ...est((g, s) => 80 + (g.ownerOf(s).bench.some(b => g.eff(b).name === 'Pancham' && b.dmg > 0) ? 120 : 0)) });
+A(`During your next turn, this Pokémon's Mochi Rush attack does 50 more damage (before applying Weakness and Resistance).`, { f: async x => { if (x.att.fx.mochi && x.att.fx.mochi.v < x.g.turnNo) x.dmg += 50; x.post(() => { if (x.g.slots(x.me).includes(x.att)) x.mark(x.att, 'mochi', x.g.turnNo, 2); }); }, ...est((g, s) => 20 + (s.fx.mochi && s.fx.mochi.v < g.turnNo ? 50 : 0)) });
+A(`If this Pokémon used Spiky Rolling during your last turn, this attack does 80 more damage.`, { f: async x => { if (x.att.persist.spiky === x.g.turnNo - 2) x.dmg += 80; x.post(() => { x.att.persist.spiky = x.g.turnNo; }); }, ...est((g, s) => 80 + (s.persist.spiky === g.turnNo - 2 ? 80 : 0)) });
+A(`If this Pokémon moved from your Bench to the Active Spot this turn, this attack does 90 more damage.`, { f: async x => { if (x.att.movedInT === x.g.turnNo) x.dmg += 90; }, ...est((g, s) => 20 + (s.movedInT === g.turnNo ? 90 : 0)) });
+A(`This attack does 20 damage for each damage counter on this Pokémon.`, { f: async x => { x.dmg = 2 * x.att.dmg; }, ...est((g, s) => 2 * s.dmg) });
+A(`This attack does 40 more damage for each damage counter on this Pokémon.`, { f: async x => { x.dmg += 4 * x.att.dmg; }, ...est((g, s) => 40 + 4 * s.dmg) });
+A(`Search your deck for a Pokémon Tool card, reveal it, and put it into your hand. Then, shuffle your deck.`, { f: async x => { await toHand(x.g, x.me, c => (def(x.g, c).sub || []).includes('Pokémon Tool'), 1, 'Busca 1 Herramienta Pokémon'); } });
+A(`If this Pokémon has a Pokémon Tool attached, this attack does 70 more damage.`, { f: async x => { if (toolsOf(x.g, x.att).length) x.dmg += 70; }, ...est((g, s) => 70 + (toolsOf(g, s).length ? 70 : 0)) });
+A(`Put 6 damage counters on your opponent's Benched Pokémon in any way you like.`, { f: async x => x.post(async () => { const g = x.g; for (let k = 0; k < 6; k++) { const opts = x.op.bench.filter(t => canHit(x, t) && !g.stadiumIs('Battle Cage')); if (!opts.length) break; const t = opts.length === 1 ? opts[0] : await g.ask(x.me, { kind: 'slot', title: `Asalto Fantasma: contador ${k + 1} de 6`, options: opts, purpose: 'curseTo' }); placeCounters(g, t || opts[0], 1, x.me); } }) });
+A(`Choose a random card from your opponent's hand. Your opponent reveals that card and shuffles it into their deck.`, FX.atk['M|Choose a random card from your opponent\'s hand, and your opponent reveals that card and shuffles it into their deck.']);
+A(`Flip 4 coins. This attack does 30 damage for each heads.`, coinsTimes(4, 30));
+A(`If you played a Supporter card that has "Team Rocket" in its name from your hand during this turn, this attack does 100 more damage.`, { f: async x => { if (x.me.used.trSup) x.dmg += 100; }, ...est((g, s) => 120 + (g.ownerOf(s).used.trSup ? 100 : 0)) });
+A(`This attack does 40 damage for each Energy attached to all of your opponent's Pokémon.`, { f: async x => { x.dmg = 40 * x.g.slots(x.op).reduce((a, t) => a + x.g.energyTokens(t).length, 0); }, ...est((g, s) => 40 * g.slots(g.opp(g.ownerOf(s))).reduce((a, t) => a + g.energyTokens(t).length, 0)) });
+A(`If this Pokémon is Burned or Poisoned, this attack does 100 more damage.`, { f: async x => { if (x.att.burn || x.att.poison) x.dmg += 100; }, ...est((g, s) => 60 + (s.burn || s.poison ? 100 : 0)) });
+A(`Discard 2 Energy from this Pokémon, and this attack also does 50 damage to 1 of your opponent's Benched Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { x.post(() => discardSelfEnergy(x, 2)); const t = await x.chooseOpp('bench', 'Elige un Pokémon en Banca del rival (50 de daño)'); if (t) x.dmgTo(t, 50); } });
+A(`If there is no Stadium in play, this attack does nothing.`, cancelUnless(x => !!x.g.stadium, g => !!g.stadium));
+A(`Flip 3 coins. For each heads, search your deck for up to 2 Basic Energy cards and attach them to your Pokémon in any way you like. Then, shuffle your deck.`, { f: async x => { const h = await x.flip(3); if (!h) return; await attachSearchEnergy(x.g, x.me, c => isBasicE(x.g, c), 2 * h, () => x.g.slots(x.me), 'Caleidovals'); } });
+A(`This attack does 80 more damage for each Energy attached to your opponent's Active Pokémon.`, { f: async x => { if (x.def) x.dmg += 80 * x.g.energyTokens(x.def).length; }, ...est((g, s, d) => 20 + (d ? 80 * g.energyTokens(d).length : 0)) });
+A(`If your opponent's Active Pokémon already has any damage counters on it, this attack does 80 more damage.`, ifDamaged(80, 20));
+A(`This Pokémon is now Asleep. Draw 2 cards.`, { f: async x => { drawN(x.g, x.me, 2); x.self('asleep'); } });
+A(`If your opponent doesn't have exactly 3 or 4 Prize cards remaining, this attack does nothing.`, cancelUnless(x => [3, 4].includes(x.op.prizes.length), (g, s) => [3, 4].includes(g.opp(g.ownerOf(s)).prizes.length)));
+A(`Search your deck for up to 3 Basic Energy cards of different types and attach them to your Tera Pokémon in any way you like. Then, shuffle your deck.`, { f: async x => { const g = x.g, p = x.me; const teras = g.slots(p).filter(s => isTera(g, s)); if (!teras.length) { g.shuffleDeck(p); return; } const got = []; for (let k = 0; k < 3; k++) { const [c] = await search(g, p, c => isBasicE(g, c) && !got.some(e => def(g, e).etype === def(g, c).etype), 1, `Carga Prisma: Energía ${k + 1} de 3 (tipos distintos)`, { purpose: 'getEnergy', keep: true }); if (!c) break; got.push(c); } g.shuffleDeck(p); await attachSpread(g, p, got, () => teras, 'Carga Prisma'); } });
+A(`If you go second, you can't use this attack during your first turn. This attack does 30 damage for each of your Benched Pokémon.`, { cond: g => g.turnNo !== 2, f: async x => { x.dmg = 30 * x.me.bench.length; }, ...est((g, s) => 30 * g.ownerOf(s).bench.length) });
+A(`During your opponent's next turn, prevent all damage done to this Pokémon by attacks from Basic non-{C} Pokémon.`, shield('basicNonC'));
+A(`This attack also does 30 damage to 1 of your opponent's Benched Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, alsoBench(30));
+A(`This attack also does 50 damage to 1 of your opponent's Benched Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, alsoBench(50));
+A(`Search your deck for an Energy card and attach it to 1 of your Benched {G} Pokémon. Then, shuffle your deck.`, { f: async x => { const g = x.g, p = x.me; const opts = () => p.bench.filter(b => hasType(g, b, 'G')); if (!opts().length) { g.shuffleDeck(p); return; } await attachSearchEnergy(g, p, c => g.isEnergy(c), 1, opts, 'Enviar Flores'); } });
+A(`If Rosa's Encouragement is in your discard pile, this attack does 150 more damage.`, { f: async x => { if (x.me.discard.some(c => def(x.g, c).name === "Rosa's Encouragement")) x.dmg += 150; }, ...est((g, s) => 100 + (g.ownerOf(s).discard.some(c => def(g, c).name === "Rosa's Encouragement") ? 150 : 0)) });
+A(`If a Stadium is in play, this attack does 60 more damage.`, { f: async x => { if (x.g.stadium) x.dmg += 60; }, ...est(g => 60 + (g.stadium ? 60 : 0)) });
+A(`Discard all Energy from this Pokémon, and this attack does 90 damage to 1 of your opponent's Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { await snipeAny(x, 90); FX.atk['M|Discard all Energy from this Pokémon.'].f(x); }, ...est(() => 90) });
+A(`Search your deck for up to 2 cards and put them into your hand. Then, shuffle your deck.`, { f: async x => { await toHand(x.g, x.me, () => true, 2, 'Busca hasta 2 cartas', 'searchAny'); } });
+A(`Your opponent's Active Pokémon is now Burned and Poisoned. Switch this Pokémon with 1 of your Benched Pokémon.`, { f: async x => { x.status(x.def, 'burned'); x.status(x.def, 'poisoned'); FX.atk['M|Switch this Pokémon with 1 of your Benched Pokémon.'].f(x); } });
+A(`Flip a coin. If heads, this attack does 80 more damage.`, coinPlus(80, 80));
+A(`This attack's damage isn't affected by Weakness or Resistance, or by any effects on your opponent's Active Pokémon.`, { f: async x => { x.wr = false; x.pierce = true; } });
+A(`This attack does 30 damage for each {W} Energy attached to this Pokémon. Switch this Pokémon with 1 of your Benched Pokémon.`, { f: async x => { x.dmg = 30 * tokensOf(x.g, x.att, 'W'); FX.atk['M|Switch this Pokémon with 1 of your Benched Pokémon.'].f(x); }, ...est((g, s) => 30 * tokensOf(g, s, 'W')) });
+A(`This attack does 70 damage for each Prize card you have taken.`, { f: async x => { x.dmg = 70 * prizesTaken(x.me); }, ...est((g, s) => 70 * prizesTaken(g.ownerOf(s))) });
+A(`Choose Basic {L} Energy cards from your discard pile up to the amount of Energy attached to all of your opponent's Pokémon and attach them to your {L} Pokémon in any way you like.`, { f: async x => { const g = x.g, p = x.me; const n = g.slots(x.op).reduce((a, t) => a + t.energy.length, 0); const cs = p.discard.filter(c => isBasicE(g, c, 'L')); const tg = () => g.slots(p).filter(s => hasType(g, s, 'L')); if (!n || !cs.length || !tg().length) return; const sel = await g.ask(p, { kind: 'cards', title: `Elige hasta ${n} Energías Rayo básicas`, cards: cs, min: 0, max: Math.min(n, cs.length), purpose: 'getEnergy' }); for (const c of sel) g.removeFrom(p.discard, c); await attachSpread(g, p, sel, tg, 'Generador de Cola'); } });
+A(`Switch in 1 of your opponent's Benched Pokémon to the Active Spot.`, { f: async x => x.post(async () => { if (x.op.bench.length) await gust(x.g, x.me, x.op); }) });
+A(`You may discard up to 4 Energy cards from your hand, and this attack does 40 more damage for each card you discarded in this way.`, { f: async x => { x.dmg += 40 * await discardHandEnergy(x, 4, (g, c) => g.isEnergy(c), 40, 'Descarta hasta 4 Energías de tu mano (+40 cada una)'); }, ...est((g, s) => 120 + 40 * Math.min(4, g.ownerOf(s).hand.filter(c => g.isEnergy(c)).length)) });
+A(`Discard up to 2 Energy cards from your hand, and this attack does 60 damage for each card you discarded in this way.`, { f: async x => { x.dmg = 0; x.dmg = 60 * await discardHandEnergy(x, 2, (g, c) => g.isEnergy(c), 60, 'Descarta hasta 2 Energías de tu mano (60 cada una)'); }, ...est((g, s) => 60 * Math.min(2, g.ownerOf(s).hand.filter(c => g.isEnergy(c)).length)) });
+A(`Discard up to 2 Basic {M} Energy cards from your hand, and this attack does 40 damage for each card you discarded in this way.`, { f: async x => { x.dmg = 0; x.dmg = 40 * await discardHandEnergy(x, 2, (g, c) => isBasicE(g, c, 'M'), 40, 'Descarta hasta 2 Energías Metálicas (40 cada una)'); }, ...est((g, s) => 40 * Math.min(2, g.ownerOf(s).hand.filter(c => isBasicE(g, c, 'M')).length)) });
+A(`Heal 30 damage from 1 of your Pokémon.`, { f: async x => { const opts = x.g.slots(x.me).filter(s => s.dmg > 0); if (!opts.length) return; const t = await x.g.ask(x.me, { kind: 'slot', title: 'Elige un Pokémon para curar 30', options: opts, purpose: 'healOwn' }); x.post(() => x.heal(t || opts[0], 30)); } });
+A(`If you played Tarragon from your hand during this turn, discard the top 3 cards of your opponent's deck.`, { f: async x => { if (x.me.used.tarragon) x.post(() => discardTop(x.g, x.op, 3)); } });
+A(`Put an Energy attached to this Pokémon into your hand.`, { f: async x => x.post(async () => { const g = x.g; if (!g.slots(x.me).includes(x.att) || !x.att.energy.length) return; const cs = x.att.energy.slice(); const [c] = cs.length === 1 ? cs : await g.ask(x.me, { kind: 'cards', title: 'Elige la Energía que vuelve a tu mano', cards: cs, min: 1, max: 1, purpose: 'discardOwnEnergy', slot: x.att }); g.removeFrom(x.att.energy, c); delete c.inPlay; x.me.hand.push(c); g.log(`${g.cn(c)} vuelve a la mano.`); }) });
+A(`If your Benched Pokémon have any damage counters on them, this attack does 60 more damage.`, { f: async x => { if (x.me.bench.some(b => b.dmg > 0)) x.dmg += 60; }, ...est((g, s) => 30 + (g.ownerOf(s).bench.some(b => b.dmg > 0) ? 60 : 0)) });
+A(`If your Benched Pokémon have any damage counters on them, this attack does 110 more damage.`, { f: async x => { if (x.me.bench.some(b => b.dmg > 0)) x.dmg += 110; }, ...est((g, s) => 110 + (g.ownerOf(s).bench.some(b => b.dmg > 0) ? 110 : 0)) });
+A(`For each of your opponent's Pokémon, flip a coin. If heads, this attack does 150 damage to that Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { x.dmg = 0; const ts = x.g.slots(x.op); for (const t of ts) { if (!await x.flip1(`Cero Anulador: ${x.g.nm(t)}`)) continue; if (t === x.op.active) x.dmg = 150; else x.dmgTo(t, 150); } }, ...est(() => 75) });
+A(`Place 3 damage counters on your opponent's Active Pokémon.`, { f: async x => counters(x, x.def, 3), ...est(() => 30) });
+A(`Place 1 damage counter on your opponent's Active Pokémon.`, { f: async x => counters(x, x.def, 1), ...est(() => 10) });
+A(`This attack does 30 more damage for each of your opponent's Benched Pokémon.`, { f: async x => { x.dmg += 30 * x.op.bench.length; }, ...est((g, s) => 10 + 30 * g.opp(g.ownerOf(s)).bench.length) });
+A(`This Pokémon also does 70 damage to itself. Your opponent's Active Pokémon is now Paralyzed and Poisoned.`, { f: async x => { x.selfDmg(70); x.status(x.def, 'paralyzed'); x.status(x.def, 'poisoned'); } });
+A(`Knock Out each of your opponent's Pokémon that has 50 HP or less remaining.`, { f: async x => x.post(() => { for (const t of x.g.slots(x.op)) if (x.g.hpLeft(t) <= 50 && canHit(x, t)) koNow(x.g, t, 'Destructor de Almas'); }), ...est((g, s, d) => d && g.hpLeft(d) <= 50 ? 999 : 0) });
+A(`Shuffle all Energy attached to this Pokémon into your deck, and this attack does 220 damage to 1 of your opponent's Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { await snipeAny(x, 220); const g = x.g; x.post(() => { for (const c of x.att.energy.slice()) { g.removeFrom(x.att.energy, c); delete c.inPlay; x.me.deck.push(c); } g.shuffleDeck(x.me); g.log(`${x.name} baraja sus Energías en el mazo.`); }); }, ...est(() => 220) });
+A(`Reveal any number of Honedge, {S}, and Aegislash from your hand, and this attack does 60 damage for each card you revealed in this way.`, { f: async x => { const n = x.me.hand.filter(c => ['Honedge', 'Doublade', 'Aegislash'].includes(def(x.g, c).name)).length; x.dmg = 60 * n; if (n) x.g.log(`${x.me.name} muestra ${n} carta(s).`); }, ...est((g, s) => 60 * g.ownerOf(s).hand.filter(c => ['Honedge', 'Doublade', 'Aegislash'].includes(def(g, c).name)).length) });
+A(`This attack does 40 damage for each damage counter on all of your Benched Rattata.`, { f: async x => { x.dmg = 4 * x.me.bench.filter(b => x.g.eff(b).name === 'Rattata').reduce((a, b) => a + b.dmg, 0); }, ...est((g, s) => 4 * g.ownerOf(s).bench.filter(b => g.eff(b).name === 'Rattata').reduce((a, b) => a + b.dmg, 0)) });
+A(`Put this Pokémon and all attached cards into your hand.`, { f: async x => x.post(async () => { const g = x.g; if (!g.slots(x.me).includes(x.att)) return; const wasA = x.me.active === x.att; g.returnSlotToHand(x.att, true); for (const c of x.me.hand) delete c.inPlay; g.log(`${x.name} vuelve a la mano.`); if (wasA) await needActive(g, x.me); }) });
+A(`Flip a coin until you get tails. Search your deck for an amount of Basic Energy up to the number of heads and attach it to this Pokémon. Then, shuffle your deck.`, { f: async x => { const h = await x.flipUntilTails(); if (!h) return; const sel = await search(x.g, x.me, c => isBasicE(x.g, c), h, `Busca hasta ${h} Energías básicas`, { purpose: 'getEnergy' }); for (const c of sel) attachCard(x.g, x.me, c, x.att); } });
+A(`This Pokémon is now Asleep.`, { f: async x => x.self('asleep') });
+A(`This attack also does 30 damage to each of your Benched Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => x.benchDmg(x.me, 30) });
+A(`Search your deck for up to 2 Pokémon with {F} Resistance, reveal them, and put them into your hand. Then, shuffle your deck.`, { f: async x => { await toHand(x.g, x.me, c => isMon(x.g, c) && def(x.g, c).res === 'F', 2, 'Busca hasta 2 Pokémon con Resistencia a Lucha'); } });
+A(`Discard random cards from your opponent's hand until they have 5 cards in their hand.`, { f: async x => x.post(() => { while (x.op.hand.length > 5) randomDiscard(x.g, x.op); }) });
+A(`Look at the top 6 cards of your deck, and you may reveal any number of Pokémon you find there and put them into your hand. Shuffle the other cards back into your deck.`, { f: async x => { const g = x.g, p = x.me; const top = p.deck.slice(-6); const ms = top.filter(c => isMon(g, c)); const sel = ms.length ? await g.ask(p, { kind: 'cards', title: 'Aroma Afrutado: elige los Pokémon para tu mano', cards: ms, min: 0, max: ms.length, purpose: 'searchHand' }) : []; for (const c of sel) { g.removeFrom(p.deck, c); p.hand.push(c); } g.shuffleDeck(p); g.log(`${p.name} pone ${sel.length} Pokémon en su mano.`); } });
+A(`If this Pokémon was healed during this turn, this attack does 200 more damage.`, { f: async x => { if (x.att.healedT === x.g.turnNo) x.dmg += 200; }, ...est((g, s) => 60 + (s.healedT === g.turnNo ? 200 : 0)) });
+A(`If you have 6 or more Pokémon that have the Hide 'n' Sneak Ability in your discard pile, place 4 damage counters on each of your opponent's Pokémon.`, { f: async x => { if (hideCount(x.g, x.me) < 6) return; for (const t of x.g.slots(x.op)) counters(x, t, 4); }, ...est((g, s) => hideCount(g, g.ownerOf(s)) >= 6 ? 40 : 0) });
+A(`During your opponent's next turn, prevent all damage done to this Pokémon by attacks from Burned Pokémon.`, shield('burnShield'));
+A(`During your opponent's next turn, prevent all damage done to this Pokémon by attacks from Evolution Pokémon.`, shield('evoShield'));
+A(`During your opponent's next turn, this Pokémon takes 100 less damage from attacks from Evolution Pokémon (after applying Weakness and Resistance).`, shield('evoReduce'));
+A(`Look at the top 9 cards of your deck, and you may put any number of Pokémon you find there onto your Bench. Shuffle the other cards back into your deck.`, { f: async x => { const g = x.g, p = x.me; const top = p.deck.slice(-9); const ms = top.filter(c => isBasicMon(g, c)); const room = benchRoom(g, p); const sel = ms.length && room > 0 ? await g.ask(p, { kind: 'cards', title: 'Portal Truco: elige Pokémon Básicos para tu Banca', cards: ms, min: 0, max: Math.min(room, ms.length), purpose: 'searchBasic' }) : []; for (const c of sel) g.removeFrom(p.deck, c); g.shuffleDeck(p); for (const c of sel) await benchCard(g, p, c); } });
+A(`Your opponent's Active Pokémon is now Burned and Confused.`, { f: async x => { x.status(x.def, 'burned'); x.status(x.def, 'confused'); } });
+A(`Reveal the bottom 7 cards of your deck, and this attack does 50 damage for each Pokémon you find there that has the Bug Out attack. Then, shuffle any revealed Pokémon back into your deck. Discard the other cards.`, { f: async x => { const g = x.g, p = x.me; const bot = p.deck.splice(0, Math.min(7, p.deck.length)); const n = bot.filter(c => isMon(g, c) && (def(g, c).atk || []).some(a => a.name === 'Bug Out')).length; x.dmg = 50 * n; for (const c of bot) { if (isMon(g, c)) p.deck.push(c); else p.discard.push(c); } g.shuffleDeck(p); g.log(`Huida Bicho: ${n} Pokémon con Huida Bicho entre las 7 cartas del fondo.`); }, ...est(() => 50) });
+A(`This attack does 40 more damage for each of your Benched Pokémon that has any {R} Energy attached.`, { f: async x => { x.dmg += 40 * x.me.bench.filter(b => tokensOf(x.g, b, 'R') > 0).length; }, ...est((g, s) => 40 + 40 * g.ownerOf(s).bench.filter(b => tokensOf(g, b, 'R') > 0).length) });
+A(`This attack does 30 damage to 1 of your opponent's Pokémon for each {W} Energy attached to this Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { await snipeAny(x, 30 * tokensOf(x.g, x.att, 'W')); }, ...est((g, s) => 30 * tokensOf(g, s, 'W')) });
+A(`This attack does 30 more damage for each of your Benched Pokémon that has "Antique" in its name.`, { f: async x => { x.dmg += 30 * x.me.bench.filter(b => x.g.eff(b).name.includes('Antique')).length; }, ...est((g, s) => 10 + 30 * g.ownerOf(s).bench.filter(b => g.eff(b).name.includes('Antique')).length) });
+A(`If your opponent has exactly 1 Prize card remaining, this attack does 200 more damage.`, { f: async x => { if (x.op.prizes.length === 1) x.dmg += 200; }, ...est((g, s) => 80 + (g.opp(g.ownerOf(s)).prizes.length === 1 ? 200 : 0)) });
+A(`If this Pokémon has no Voltaic {L} Energy attached, this attack does nothing.`, cancelUnless(x => x.att.energy.some(c => /Voltaic/.test(def(x.g, c).name)), (g, s) => s.energy.some(c => /Voltaic/.test(def(g, c).name))));
+A(`This attack does 60 damage for each {L} Energy attached to this Pokémon.`, { f: async x => { x.dmg = 60 * tokensOf(x.g, x.att, 'L'); }, ...est((g, s) => 60 * tokensOf(g, s, 'L')) });
+A(`You may discard any number of cards from your hand.`, { f: async x => { const g = x.g, p = x.me; if (!p.hand.length) return; const sel = await g.ask(p, { kind: 'cards', title: 'Puedes descartar cartas de tu mano', cards: p.hand.slice(), min: 0, max: p.hand.length, purpose: 'discardHand' }); for (const c of sel) { g.removeFrom(p.hand, c); g.toDiscard(c); } if (sel.length) g.log(`${p.name} descarta ${sel.length} carta(s).`); } });
+A(`If you have no cards in your hand, this attack does 160 more damage.`, { f: async x => { if (!x.me.hand.length) x.dmg += 160; }, ...est((g, s) => 50 + (g.ownerOf(s).hand.length ? 0 : 160)) });
+A(`During your opponent's next turn, if this Pokémon is damaged by an attack (even if this Pokémon is Knocked Out), place 12 damage counters on the Attacking Pokémon.`, shield('shellnado'));
+A(`At the end of your opponent's next turn, discard the Defending Pokémon and all attached cards.`, { f: async x => x.markPost(x.def, 'kiss') });
+A(`You may search your deck for a card and put it into your hand. Then, shuffle your deck.`, { f: async x => { await toHand(x.g, x.me, () => true, 1, 'Busca 1 carta (opcional)', 'searchAny'); } });
+A(`If you have 13 or more Pokémon that have the Hide 'n' Sneak Ability in your discard pile, choose 2 of your opponent's Pokémon and quadruple the number of damage counters on each of them.`, { f: async x => { const g = x.g; if (hideCount(g, x.me) < 13) return; const all = g.slots(x.op).filter(t => t.dmg > 0); if (!all.length) return; const ts = all.length <= 2 ? all : await g.ask(x.me, { kind: 'slots', title: 'Elige 2 Pokémon rivales (cuadruplica sus contadores)', options: all, min: 2, max: 2, purpose: 'damageOpp' }); x.post(() => { for (const t of ts) if (canHit(x, t)) placeCounters(g, t, 3 * t.dmg / 10, x.me); }); } });
+A(`Search your deck for up to 3 {S} and put them onto your Bench. Then, shuffle your deck.`, { f: async x => { await toBench(x.g, x.me, c => isBasicMon(x.g, c) && ['Litwick', 'Lampent'].includes(def(x.g, c).name), 3, 'Busca hasta 3 Litwick para tu Banca'); } });
+A(`This attack does 50 more damage for each {C} in your opponent's Active Pokémon's Retreat Cost.`, { f: async x => { if (x.def) x.dmg += 50 * x.g.retreatCost(x.def); }, ...est((g, s, d) => 130 + (d ? 50 * g.retreatCost(d) : 0)) });
+A(`This attack does 30 damage for each {C} in your opponent's Active Pokémon's Retreat Cost.`, { f: async x => { x.dmg = x.def ? 30 * x.g.retreatCost(x.def) : 0; }, ...est((g, s, d) => d ? 30 * g.retreatCost(d) : 0) });
+A(`If you have 4 or more Pokémon that have the Hide 'n' Sneak Ability in your discard pile, this attack does 140 more damage.`, { f: async x => { if (hideCount(x.g, x.me) >= 4) x.dmg += 140; }, ...est((g, s) => 30 + (hideCount(g, g.ownerOf(s)) >= 4 ? 140 : 0)) });
+A(`Place 5 damage counters on 1 of your opponent's Benched Pokémon.`, { f: async x => { const t = await x.chooseOpp('bench', 'Elige un Pokémon en Banca del rival (5 contadores)', 'curseTo'); if (t) counters(x, t, 5); } });
+A(`During your next turn, attacks used by this Pokémon do 150 more damage to your opponent's Active Pokémon (before applying Weakness and Resistance).`, { f: async x => x.post(() => { if (x.g.slots(x.me).includes(x.att)) x.mark(x.att, 'rowdy', x.g.turnNo, 2); }), ...est((g, s) => 150 + (s.fx.rowdy && s.fx.rowdy.v < g.turnNo ? 150 : 0)) });
+A(`If your opponent's Active Pokémon is an Evolution Pokémon, this attack does 30 more damage.`, { f: async x => { if (isEvo(x.g, x.def)) x.dmg += 30; }, ...est((g, s, d) => 30 + (isEvo(g, d) ? 30 : 0)) });
+A(`If your opponent's Active Pokémon is affected by a Special Condition, it is Knocked Out.`, { f: async x => { if (!hasSC(x.def)) return; x.post(() => { if (canHit(x, x.def)) koNow(x.g, x.def, 'Ojo Abisal'); }); }, ...est((g, s, d) => hasSC(d) ? 999 : 0) });
+A(`This attack does 70 damage to 1 of your opponent's Pokémon that has any Special Energy attached. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { const g = x.g; const opts = g.slots(x.op).filter(t => t.energy.some(c => !def(g, c).basic)); x.dmg = 0; if (!opts.length) { x.target = null; return; } const t = opts.length === 1 ? opts[0] : await g.ask(x.me, { kind: 'slot', title: 'Elige un Pokémon rival con Energía Especial (70 de daño)', options: opts, purpose: 'damageOpp' }); const tt = t || opts[0]; if (tt === x.op.active) x.dmg = 70; else { x.target = null; x.dmgTo(tt, 70); } }, ...est(() => 0) });
+A(`Search your deck for an Item card, reveal it, and put it into your hand. Then, shuffle your deck.`, { f: async x => { await toHand(x.g, x.me, c => (def(x.g, c).sub || []).includes('Item'), 1, 'Busca 1 carta de Objeto'); } });
+A(`If your opponent's Active Pokémon isn't Confused, this attack does nothing.`, cancelUnless(x => x.def && x.def.st === 'confused', (g, s, d) => d && d.st === 'confused'));
+A(`This attack also does 30 damage to 1 of your Benched Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)`, { f: async x => { if (!x.me.bench.length) return; const t = await x.g.ask(x.me, { kind: 'slot', title: 'Elige uno de tus Pokémon en Banca (30 de daño)', options: x.me.bench.slice(), purpose: 'own' }); x.post(() => { const tt = t || x.me.bench[0]; if (tt && x.g.slots(x.me).includes(tt)) { tt.dmg += 30; x.g.log(`${x.g.nm(tt)} recibe 30 de daño.`); } }); } });
+A(`If your Benched Pokémon have any Shadowy {D} Energy attached, this attack does 70 more damage.`, { f: async x => { if (x.me.bench.some(b => b.energy.some(c => /Shadowy/.test(def(x.g, c).name)))) x.dmg += 70; } });
+A(`During your opponent's next turn, this Pokémon takes 100 more damage from attacks (after applying Weakness and Resistance).`, { f: async x => x.post(() => { if (x.g.slots(x.me).includes(x.att)) x.mark(x.att, 'vuln', 100); }) });
+A(`If this Pokémon has 2 or more damage counters on it, this attack does 90 more damage. This attack's damage isn't affected by Weakness.`, { f: async x => { x.weak = false; if (x.att.dmg >= 20) x.dmg += 90; }, ...est((g, s) => 20 + (s.dmg >= 20 ? 90 : 0)) });
+A(`If your opponent's Active Pokémon is a {M} Pokémon, this attack does 30 more damage.`, { f: async x => { if (x.def && hasType(x.g, x.def, 'M')) x.dmg += 30; }, ...est((g, s, d) => 10 + (d && hasType(g, d, 'M') ? 30 : 0)) });
+A(`If this Pokémon has at least 2 extra Energy attached (in addition to this attack's cost), this attack does 130 more damage.`, { f: async x => { if (x.g.energyTokens(x.att).length - x.atk.cost.length >= 2) x.dmg += 130; }, ...est((g, s, d, a) => 200 + (g.energyTokens(s).length - a.cost.length >= 2 ? 130 : 0)) });
+A(`Flip a coin. If tails, this attack does nothing. If heads, during your opponent's next turn, prevent all damage from and effects of attacks done to this Pokémon.`, { f: async x => { if (!await x.flip1()) { x.cancel(); return; } x.post(() => x.mark(x.att, 'immune')); }, ...est(() => 15) });
+A(`Flip 2 coins. If both of them are heads, search your deck for a Pokémon and put it onto your Bench. Then, shuffle your deck.`, { f: async x => { if (await x.flip(2) < 2) return; await toBench(x.g, x.me, c => isBasicMon(x.g, c), 1, 'Busca 1 Pokémon Básico para tu Banca'); } });
+
+// ---------- habilidades (fase 2) ----------
+const healAll = n => async (g, p) => { for (const s of g.slots(p)) { const h = g.heal(s, n); if (h) g.log(`${g.nm(s)} se cura ${h}.`); } };
+W('Lovely Fragrance', { once: true, can: (g, p) => g.slots(p).some(s => s.dmg > 0), use: healAll(30), ai: (g, p) => g.slots(p).some(s => s.dmg > 0) });
+const searchAb = (title, f, purpose) => ({ once: true, can: (g, p) => p.deck.length > 0, use: async (g, p) => { await toHand(g, p, c => f(g, c), 1, title, purpose); }, ai: (g, p) => p.deck.some(c => f(g, c)) && p.hand.length < 8 });
+W('Gathering of Blossoms', searchAb("Busca 1 Pokémon de Erika", (g, c) => isMon(g, c) && def(g, c).name.indexOf("Erika's") === 0));
+W('Champion\'s Call', searchAb("Busca 1 Pokémon de Cintia", (g, c) => isMon(g, c) && def(g, c).name.indexOf("Cynthia's") === 0));
+W('Evolutionary Guidance', Object.assign(searchAb('Busca 1 Pokémon de Evolución', (g, c) => isMon(g, c) && def(g, c).stage > 0), { can: (g, p, s) => s.energy.length > 0 && p.deck.length > 0 }));
+W('Multiplying Cocoon', { onEvolve: async (g, p) => { await toBench(g, p, c => ['Silcoon', 'Cascoon'].includes(def(g, c).name), 1, 'Capullo Múltiple: busca Silcoon o Cascoon'); } });
+W('Boisterous Wind', { once: true, can: (g, p) => { const a = g.opp(p).active; return a && a.energy.length > 0; }, use: async (g, p) => { const o = g.opp(p); if (!await g.flipHeads(p, 1, 'Viento Bullicioso')) return; const t = o.active; if (!t || !t.energy.length || g.effectsBlocked(t, p)) return; const [c] = t.energy.length === 1 ? t.energy.slice() : await g.ask(p, { kind: 'cards', title: 'Elige la Energía que vuelve a la mano rival', cards: t.energy.slice(), min: 1, max: 1, purpose: 'discardOppEnergy', slot: t }); g.removeFrom(t.energy, c); delete c.inPlay; o.hand.push(c); g.log(`${g.cn(c)} vuelve a la mano de ${o.name}.`); }, ai: () => true });
+W('Charging Up', { once: true, can: (g, p) => p.discard.some(c => isBasicE(g, c)), use: async (g, p, s) => { const cs = p.discard.filter(c => isBasicE(g, c)); const [c] = cs.length === 1 ? cs : await g.ask(p, { kind: 'cards', title: 'Recarga: elige 1 Energía básica de tu pila de descartes', cards: cs, min: 1, max: 1, purpose: 'getEnergy' }); g.removeFrom(p.discard, c); attachCard(g, p, c, s); }, ai: () => true });
+W('Melt Away', {});
+W('Golden Flame', { once: true, can: (g, p) => p.hand.some(c => isBasicE(g, c, 'R')) && p.bench.some(b => named(g, b, "Ethan's")), use: async (g, p) => { const opts = p.bench.filter(b => named(g, b, "Ethan's")); const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Llama Dorada: elige un Pokémon de Eco en Banca', options: opts, purpose: 'energyTarget' }); const cs = p.hand.filter(c => isBasicE(g, c, 'R')); const sel = cs.length <= 2 ? cs : await g.ask(p, { kind: 'cards', title: 'Elige hasta 2 Energías Fuego', cards: cs, min: 1, max: 2, purpose: 'getEnergy' }); for (const c of sel) { g.removeFrom(p.hand, c); attachCard(g, p, c, t || opts[0]); } }, ai: () => true });
+W('Incandescent Body', {});
+W('Damp', {});
+W('Alluring Wings', { once: true, can: (g, p, s) => p.active === s, use: async (g, p) => { for (const pl of [p, g.opp(p)]) g.draw(pl, 1); g.log('Cada jugador roba 1 carta.'); }, ai: (g, p) => p.hand.length <= 5 });
+W('Resolute Heart', {});
+W('Dynamotor', { once: true, can: (g, p) => p.bench.length > 0 && p.discard.some(c => isBasicE(g, c, 'L')), use: async (g, p) => { const c = p.discard.find(c => isBasicE(g, c, 'L')); const t = await g.ask(p, { kind: 'slot', title: 'Dinamo: ¿a qué Pokémon en Banca unes la Energía Rayo?', options: p.bench.slice(), purpose: 'energyTarget', card: c }); g.removeFrom(p.discard, c); attachCard(g, p, c, t || p.bench[0]); }, ai: () => true });
+W('Frilled Generator', { once: true, can: (g, p) => !!p.used.canari, use: async (g, p, s) => { const sel = await search(g, p, c => isBasicE(g, c, 'L'), 2, 'Generador Gorguera: busca hasta 2 Energías Rayo', { purpose: 'getEnergy' }); for (const c of sel) attachCard(g, p, c, s); }, ai: () => true });
+W('Counterattack Quills', {});
+W('Electric Streamer', { can: (g, p) => p.hand.some(c => isBasicE(g, c, 'L')) && g.slots(p).some(s => named(g, s, "Iono's")), use: async (g, p) => { const opts = g.slots(p).filter(s => named(g, s, "Iono's")); const c = p.hand.find(c => isBasicE(g, c, 'L')); const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Serpentina Eléctrica: ¿a qué Pokémon de E-Nigma unes la Energía Rayo?', options: opts, purpose: 'energyTarget', card: c }); g.removeFrom(p.hand, c); attachCard(g, p, c, t || opts[0]); }, ai: (g, p) => g.slots(p).some(s => named(g, s, "Iono's") && (() => { const b = PT.AI.bestAttack(g, p, s, g.opp(p).active); return b && b.miss > 0; })()) });
+W('Flashing Draw', { once: true, can: (g, p, s) => g.energyCardsOf(s, 'L').some(c => def(g, c).basic) && p.hand.length < 6 && p.deck.length > 0, use: async (g, p, s) => { const c = g.energyCardsOf(s, 'L').find(c => def(g, c).basic); g.removeFrom(s.energy, c); g.toDiscard(c); drawTo(g, p, 6); }, ai: (g, p) => p.hand.length <= 3 });
+W('Fairy Zone', {});
+W('Power Saver', {});
+W('Wonder Kiss', {});
+W('Bubble Gathering', { can: (g, p, s) => g.slots(p).some(t => t !== s && t.energy.length), use: async (g, p, s) => moveEnergy(g, p, g.slots(p).filter(t => t !== s && t.energy.length), () => true, () => [s], 'Reunir Burbujas'), ai: (g, p, s) => p.active === s && (() => { const b = PT.AI.bestAttack(g, p, s, g.opp(p).active); return b && b.miss > 0; })() && p.bench.some(b => b.energy.length) });
+W('Adrena-Brain', { once: true, can: (g, p, s) => tokensOf(g, s, 'D') > 0 && g.slots(p).some(t => t.dmg > 0), use: async (g, p) => { const o = g.opp(p); const from = await g.ask(p, { kind: 'slot', title: 'Adrenacerebro: elige tu Pokémon con contadores', options: g.slots(p).filter(t => t.dmg > 0), purpose: 'curseFrom' }); if (!from) return false; const to = await g.ask(p, { kind: 'slot', title: 'Adrenacerebro: elige el Pokémon rival', options: g.slots(o), purpose: 'curseTo' }); if (!to) return false; if (g.effectsBlocked(to, p) || ab(g, to, 'Luminous Wing')) { g.log('El efecto no afecta a ese Pokémon.'); return; } const n = Math.min(3, from.dmg / 10); from.dmg -= 10 * n; to.dmg += 10 * n; g.log(`Adrenacerebro mueve ${n} contador(es) de ${g.nm(from)} a ${g.nm(to)}.`); }, ai: (g, p) => g.slots(p).some(t => t.dmg >= 30) });
+W('Holes', {});
+W('Tenacious Body', {});
+W('Durable Body', {});
+W('Double Type', {});
+W('Counterattacking Crest', {});
+W('Trade', { once: true, can: (g, p) => p.hand.length > 0 && p.deck.length > 0, use: async (g, p) => { const [c] = await g.ask(p, { kind: 'cards', title: 'Intercambio: descarta 1 carta de tu mano', cards: p.hand.slice(), min: 1, max: 1, purpose: 'discardHand' }); g.removeFrom(p.hand, c); g.toDiscard(c); drawN(g, p, 2); }, ai: (g, p) => p.hand.length >= 2 && p.hand.length <= 6 });
+W('Flip the Script', { once: true, can: (g, p) => !p.used.flipScript && p.koList && p.koList.t === g.turnNo - 1 && p.deck.length > 0, use: async (g, p) => { p.used.flipScript = true; drawN(g, p, 3); }, ai: () => true });
+W('Final Chain', {});
+W('Supreme Overlord', {});
+W('Sky Transport', { once: true, can: (g, p) => p.active && p.bench.length > 0, use: async (g, p) => { await selfSwitch(g, p, false); }, ai: (g, p) => switchUseful(g, p, () => true) });
+W('Recon Directive', { once: true, can: (g, p) => p.deck.length > 0, use: async (g, p) => { const top = p.deck.slice(-2).reverse(); const [c] = top.length === 1 ? top : await g.ask(p, { kind: 'cards', title: 'Directiva de Reconocimiento: elige 1 carta para tu mano', cards: top, min: 1, max: 1, purpose: 'searchHand' }); g.removeFrom(p.deck, c); p.hand.push(c); for (const o of top) if (o !== c) { g.removeFrom(p.deck, o); p.deck.unshift(o); } g.log(`${p.name} pone 1 carta en su mano y otra al fondo del mazo.`); }, ai: () => true });
+W('Fan Call', { once: true, can: (g, p) => g.firstTurn[p.i] && !p.used.fanCall, use: async (g, p) => { p.used.fanCall = true; await toHand(g, p, c => isMon(g, c) && def(g, c).types.includes('C') && def(g, c).hp <= 100, 3, 'Llamada Ventilador: busca hasta 3 Pokémon Incoloros con 100 PS o menos'); }, ai: () => true });
+W('Lethargic Charge', { once: true, can: (g, p, s) => p.bench.includes(s) && named(g, p.active, "Larry's") && p.hand.some(c => g.isEnergy(c)), use: async (g, p) => { const cs = p.hand.filter(c => g.isEnergy(c)); const [c] = cs.length === 1 ? cs : await g.ask(p, { kind: 'cards', title: 'Carga Letárgica: elige 1 Energía de tu mano', cards: cs, min: 1, max: 1, purpose: 'getEnergy' }); g.removeFrom(p.hand, c); attachCard(g, p, c, p.active); }, ai: () => true });
+W('Punk Up', { onEvolve: async (g, p) => { await attachSearchEnergy(g, p, c => isBasicE(g, c, 'D'), 5, () => g.slots(p).filter(s => named(g, s, "Marnie's")), 'Ánimo Punk'); } });
+W('X-Boot', { once: true, can: (g, p) => g.slots(p).some(s => hasType(g, s, 'P') || hasType(g, s, 'M')), use: async (g, p) => { for (const t of ['P', 'M']) { const tg = () => g.slots(p).filter(s => hasType(g, s, t)); if (!tg().length) continue; const [c] = await search(g, p, c => isBasicE(g, c, t), 1, `Arranque X: busca 1 Energía ${TYN[t]} básica`, { purpose: 'getEnergy', keep: true }); if (c) await attachSpread(g, p, [c], tg, 'Arranque X'); } g.shuffleDeck(p); }, ai: () => true });
+W('Grand Wing', { once: true, can: (g, p) => g.opp(p).hand.length > 0, use: async (g, p) => { const o = g.opp(p); const n = o.hand.length; shuffle(o.hand, g.rnd); o.deck.unshift(...o.hand.splice(0)); if (n) g.draw(o, 4); g.log(`${o.name} pone su mano al fondo del mazo y roba 4 cartas.`); }, ai: (g, p) => g.opp(p).hand.length >= 6 });
+W("Sniper's Eye", {});
+W('Sky Hunt', { once: true, can: (g, p) => g.opp(p).hand.length > 0, use: async (g, p) => { if (await g.flipHeads(p, 1, 'Caza Aérea')) randomDiscard(g, g.opp(p)); }, ai: () => true });
+W('Shell Spikes', {});
+W('Wash Out', { can: (g, p) => p.active && p.bench.some(b => g.energyCardsOf(b, 'W').length), use: async (g, p) => moveEnergy(g, p, p.bench.filter(b => g.energyCardsOf(b, 'W').length), c => def(g, c).etype === 'W', () => [p.active], 'Lavado'), ai: (g, p) => { const b = PT.AI.bestAttack(g, p, p.active, g.opp(p).active); return b && b.miss > 0; } });
+W('Tundra Wall', {});
+W('Fighting Roar', {});
+W('Luminous Wing', {});
+W('Scent Collection', { once: true, can: (g, p) => p.deck.some(c => isBasicE(g, c, 'P')), use: async (g, p) => { await toHand(g, p, c => isBasicE(g, c, 'P'), 2, 'Colección de Aromas: busca hasta 2 Energías Psíquicas', 'getEnergy'); }, ai: (g, p) => p.hand.filter(c => g.isEnergy(c)).length < 2 });
+W('Stone Arms', { once: true, can: (g, p) => p.hand.some(c => isBasicE(g, c, 'F')) && g.slots(p).some(s => hasType(g, s, 'F')), use: async (g, p) => { const opts = g.slots(p).filter(s => hasType(g, s, 'F')); const c = p.hand.find(c => isBasicE(g, c, 'F')); const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Brazos de Piedra: ¿a qué Pokémon Lucha unes la Energía?', options: opts, purpose: 'energyTarget', card: c }); g.removeFrom(p.hand, c); attachCard(g, p, c, t || opts[0]); }, ai: () => true });
+W('Tyrannically Gutsy', {});
+W('Infinite Shadow', {});
+W('Last-Ditch Catch', { onBenchPlay: true });
+W("Hide 'n' Sneak", {});
+W('Enriching Melody', { onEvolve: async (g, p) => { const opts = g.slots(p).filter(s => s.dmg > 0); if (!opts.length) return; const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Melodía Enriquecedora: cura todo el daño de un Pokémon', options: opts, purpose: 'healOwn' }); const s = t || opts[0]; const h = g.heal(s, s.dmg); g.log(`${g.nm(s)} se cura ${h}.`); } });
+W('Photon Cord', {});
+W('Binding Flame', {});
+W('Destructive Headbutting', { once: true, can: (g, p, s) => p.active === s && g.opp(p).active && g.opp(p).active.energy.length > 0, use: async (g, p) => { const o = g.opp(p); if (!await g.flipHeads(p, 1, 'Cabezazo Destructivo')) return; const t = o.active; if (!t || !t.energy.length || g.effectsBlocked(t, p) || ab(g, t, 'Luminous Wing')) return; const [c] = t.energy.length === 1 ? t.energy.slice() : await g.ask(p, { kind: 'cards', title: 'Elige la Energía a descartar', cards: t.energy.slice(), min: 1, max: 1, purpose: 'discardOppEnergy', slot: t }); g.removeFrom(t.energy, c); g.toDiscard(c); g.log(`Se descarta ${g.cn(c)} de ${g.nm(t)}.`); }, ai: () => true });
+W('Ancient Bulwark', {});
+W('Aerial Draw', { once: true, can: (g, p) => p.deck.length > 0, use: async (g, p) => { drawN(g, p, 1); }, ai: () => true });
+W('Call a Buddy', { once: true, can: (g, p) => !p.hand.length && p.deck.length > 0, use: async (g, p) => { await toHand(g, p, c => (def(g, c).sub || []).includes('Supporter'), 1, 'Llamar a un Compañero: busca 1 Partidario'); }, ai: () => true });
+
+// ---------- entrenadores (fase 2) ----------
+const SUPd = (g, p) => p.hand.length <= 3 ? SUP : p.hand.length <= 5 ? 9 : 3;
+const trSup = fn => async (g, p, c) => { p.used.trSup = true; return fn(g, p, c); };
+const discOther = (g, p, c) => p.hand.some(h => h !== c);
+async function discardOneOther(g, p, c, title) { const cs = p.hand.filter(h => h !== c); const [d] = await g.ask(p, { kind: 'cards', title: title || 'Descarta 1 carta de tu mano', cards: cs, min: 1, max: 1, purpose: 'discardHand' }); g.removeFrom(p.hand, d); g.toDiscard(d); }
+const N_SIX = ["N's Darmanitan", "N's Zoroark ex", "N's Vanilluxe", "N's Klinklang", "N's Reshiram", "N's Zekrom"];
+T('Anthea & Concordia', { can: (g, p) => N_SIX.every(n => g.slots(p).some(s => g.eff(s).name === n)), play: async (g, p) => { p.flags.anthea = { until: g.turnNo }; g.log('Si tu Pokémon de N deja Fuera de Combate al Activo rival este turno, tomas 3 cartas de Premio más.'); }, ai: () => 15 });
+T('Canari', { can: discOther, play: async (g, p, c) => { await discardOneOther(g, p, c); p.used.canari = true; await toHand(g, p, h => isMon(g, h) && def(g, h).types.includes('L'), 4, 'Busca hasta 4 Pokémon Rayo'); }, ai: (g, p) => p.hand.length >= 3 && p.deck.some(h => isMon(g, h) && def(g, h).types.includes('L')) ? 12 : 0 });
+T('Counter Gain', { tool: true, ai: (g, p) => p.active && g.toolRoom(p.active) && p.prizes.length > g.opp(p).prizes.length ? 8 : 0 });
+T('Glass Trumpet', { can: (g, p) => g.slots(p).some(s => isTera(g, s)) && p.discard.some(c => isBasicE(g, c)) && p.bench.some(s => hasType(g, s, 'C')), play: async (g, p) => { const opts = p.bench.filter(s => hasType(g, s, 'C')); const ts = opts.length <= 2 ? opts : await g.ask(p, { kind: 'slots', title: 'Trompeta de Cristal: elige hasta 2 Pokémon Incoloros en Banca', options: opts, min: 1, max: 2, purpose: 'energyTarget' }); for (const t of ts) { const c = p.discard.find(c => isBasicE(g, c)); if (!c) break; g.removeFrom(p.discard, c); attachCard(g, p, c, t); } }, ai: () => 11 });
+T("Iris's Fighting Spirit", { can: (g, p, c) => discOther(g, p, c) && p.hand.length < 7, play: async (g, p, c) => { await discardOneOther(g, p, c); drawTo(g, p, 6); }, ai: (g, p) => p.hand.length <= 3 ? SUP : 0 });
+T('Light Ball', { tool: true, ai: (g, p) => g.slots(p).some(s => g.eff(s).name === 'Pikachu ex' && g.toolRoom(s)) ? 9 : 0 });
+T("N's PP Up", { can: (g, p) => p.discard.some(c => isBasicE(g, c)) && p.bench.some(s => named(g, s, "N's")), play: async (g, p) => { const opts = p.bench.filter(s => named(g, s, "N's")); const cs = p.discard.filter(c => isBasicE(g, c)); const [c] = cs.length === 1 ? cs : await g.ask(p, { kind: 'cards', title: 'Más PP de N: elige 1 Energía básica', cards: cs, min: 1, max: 1, purpose: 'getEnergy' }); const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: '¿A qué Pokémon de N en Banca la unes?', options: opts, purpose: 'energyTarget', card: c }); g.removeFrom(p.discard, c); attachCard(g, p, c, t || opts[0]); }, ai: () => 10 });
+T('Nighttime Mine', { stadium: true, ai: (g, p) => isTera(g, g.opp(p).active) && !g.stadiumIs('Nighttime Mine') ? 7 : 0 });
+T('Poké Pad', { play: async (g, p) => { await toHand(g, p, c => isMon(g, c) && !def(g, c).ex, 1, 'Busca 1 Pokémon sin Regla'); }, ai: (g, p) => wantMon(g, p) ? 9 : 0 });
+T('Surfer', { can: (g, p) => p.bench.length > 0, play: async (g, p) => { if (await selfSwitch(g, p, false)) drawTo(g, p, 5); }, ai: (g, p) => switchUseful(g, p, () => true) ? 14 : p.hand.length <= 2 ? 8 : 0 });
+T("Team Rocket's Archer", { can: (g, p) => koLast(g, p, "Team Rocket's"), play: trSup(async (g, p) => { const o = g.opp(p); for (const pl of [p, o]) { pl.deck.push(...pl.hand.splice(0)); g.shuffleDeck(pl); } g.draw(p, 5); g.draw(o, 3); g.log(`Cada jugador baraja su mano: ${p.name} roba 5 y ${o.name} roba 3.`); }), ai: (g, p) => g.opp(p).hand.length >= 5 ? SUP : 8 });
+T("Team Rocket's Ariana", { play: trSup(async (g, p) => { const all = g.slots(p).every(s => named(g, s, "Team Rocket's")); drawTo(g, p, all ? 8 : 5); }), ai: (g, p) => { const all = g.slots(p).every(s => named(g, s, "Team Rocket's")); return (all ? 8 : 5) - p.hand.length >= 3 ? SUP : 0; }, can: (g, p) => p.hand.length < 8 });
+T("Team Rocket's Factory", { stadium: true, once: true, action: async (g, p) => { drawN(g, p, 2); }, actionLabel: 'Fábrica del Team Rocket', actionCan: (g, p) => !!p.used.trSup && p.deck.length > 0, ai: (g, p) => g.slots(p).some(s => named(g, s, "Team Rocket's")) && !g.stadiumIs("Team Rocket's Factory") ? 6 : 0, aiAction: () => true });
+T("Team Rocket's Giovanni", { can: (g, p) => named(g, p.active, "Team Rocket's") && p.bench.some(s => named(g, s, "Team Rocket's")), play: trSup(async (g, p) => { const opts = p.bench.filter(s => named(g, s, "Team Rocket's")); const t = await g.ask(p, { kind: 'slot', title: 'Elige tu Pokémon del Team Rocket en Banca', options: opts, purpose: 'swapTo' }); await g.switchActive(p, t || opts[0], 'force'); await gust(g, p, g.opp(p)); }), ai: (g, p) => bossValue(g, p) });
+T("Team Rocket's Great Ball", { play: async (g, p) => { const h = await g.flipHeads(p, 1, 'Super Ball del Team Rocket'); await toHand(g, p, c => isMon(g, c) && def(g, c).name.indexOf("Team Rocket's") === 0 && (h ? def(g, c).stage > 0 : def(g, c).stage === 0), 1, h ? 'Busca 1 Pokémon de Evolución del Team Rocket' : 'Busca 1 Pokémon Básico del Team Rocket'); }, ai: (g, p) => p.deck.some(c => isMon(g, c) && def(g, c).name.indexOf("Team Rocket's") === 0) ? 8 : 0 });
+T("Team Rocket's Hypnotizer", { tool: true, ai: (g, p) => named(g, p.active, "Team Rocket's") && g.toolRoom(p.active) ? 7 : 0 });
+T("Team Rocket's Petrel", { play: trSup(async (g, p) => { await toHand(g, p, c => def(g, c).st === 'T', 1, 'Busca 1 carta de Entrenador', 'searchAny'); }), ai: (g, p) => p.hand.length <= 4 ? 10 : 4 });
+T("Team Rocket's Proton", { firstTurn: true, play: trSup(async (g, p) => { await toHand(g, p, c => isBasicMon(g, c) && def(g, c).name.indexOf("Team Rocket's") === 0, 3, 'Busca hasta 3 Pokémon Básicos del Team Rocket'); }), ai: (g, p) => benchRoom(g, p) >= 2 && p.deck.some(c => isBasicMon(g, c) && def(g, c).name.indexOf("Team Rocket's") === 0) ? 13 : 0 });
+T("Team Rocket's Transceiver", { play: async (g, p) => { await toHand(g, p, c => (def(g, c).sub || []).includes('Supporter') && def(g, c).name.includes('Team Rocket'), 1, 'Busca 1 Partidario del Team Rocket'); }, ai: (g, p) => !p.hand.some(c => (def(g, c).sub || []).includes('Supporter')) && p.deck.some(c => (def(g, c).sub || []).includes('Supporter') && def(g, c).name.includes('Team Rocket')) ? 10 : 0 });
+T("Team Rocket's Watchtower", { stadium: true, ai: (g, p) => g.slots(g.opp(p)).some(s => hasType(g, s, 'C') && g.baseDef(s).pw) && !g.slots(p).some(s => hasType(g, s, 'C') && g.baseDef(s).pw) && !g.stadiumIs("Team Rocket's Watchtower") ? 7 : 0 });
+T('Thick Scale', { tool: true, ai: (g, p) => g.slots(p).some(s => hasType(g, s, 'N') && g.toolRoom(s)) ? 7 : 0 });
+T('Tool Scrapper', { can: (g, p) => g.allSlots().some(s => toolsOf(g, s).length), play: async (g, p) => { const opts = []; const labels = []; for (const s of g.allSlots()) for (const c of toolsOf(g, s)) { opts.push([s, c]); labels.push(`${g.cn(c)} de ${g.nm(s)}`); } for (let k = 0; k < 2 && opts.length; k++) { let i = 0; if (opts.length > 1) { const mine = opts.findIndex(o => o[0].owner !== p.i); i = p.ai ? Math.max(0, mine) : await g.ask(p, { kind: 'option', title: `Desguazador: herramienta ${k + 1} de 2`, options: labels, purpose: 'scrap' }); } const [s, c] = opts.splice(i, 1)[0]; labels.splice(i, 1); g.discardAtt(s, c); g.log(`Se descarta ${g.cn(c)}.`); if (p.ai && !opts.some(o => o[0].owner !== p.i)) break; } }, ai: (g, p) => g.slots(g.opp(p)).some(s => toolsOf(g, s).length) ? 7 : 0 });
+T('Urbain', { play: async (g, p) => { drawN(g, p, 3); }, ai: (g, p) => p.hand.length <= 4 ? 12 : 5 });
+T('Cheren', { play: async (g, p) => { drawN(g, p, 3); }, ai: (g, p) => p.hand.length <= 4 ? 12 : 5 });
+T('Waitress', { play: async (g, p) => { const top = p.deck.slice(-6); const en = top.filter(c => isBasicE(g, c)); if (en.length) { const [c] = en.length === 1 ? en : await g.ask(p, { kind: 'cards', title: 'Camarera: elige 1 Energía básica', cards: en, min: 0, max: 1, purpose: 'getEnergy' }); if (c) { g.removeFrom(p.deck, c); await attachSpread(g, p, [c], () => g.slots(p), 'Camarera'); } } g.shuffleDeck(p); }, ai: () => 8 });
+T("Black Belt's Training", { play: async (g, p) => { p.flags.blackBelt = { until: g.turnNo }; g.log('Este turno tus ataques hacen 40 de daño más al Pokémon ex Activo rival.'); }, ai: (g, p) => isEx(g, g.opp(p).active) && p.active && (() => { const b = PT.AI.bestAttack(g, p, p.active, g.opp(p).active); return b && b.miss === 0 && b.dmg < g.hpLeft(g.opp(p).active) && b.dmg + 40 >= g.hpLeft(g.opp(p).active); })() ? 16 : 0 });
+T('Jamming Tower', { stadium: true, ai: (g, p) => g.slots(g.opp(p)).reduce((a, s) => a + toolsOf(g, s).length, 0) > g.slots(p).reduce((a, s) => a + toolsOf(g, s).length, 0) && !g.stadiumIs('Jamming Tower') ? 6 : 0 });
+for (const n of ['Antique Jaw Fossil', 'Antique Sail Fossil', 'Antique Armor Fossil', 'Antique Skull Fossil']) T(n, { ai: (g, p) => benchRoom(g, p) > 1 && p.hand.some(c => def(g, c).from === n) ? 12 : (benchRoom(g, p) > 2 && p.deck.some(c => def(g, c).from === n) ? 4 : 0) });
+T('Core Memory', { tool: true, ai: (g, p) => g.slots(p).some(s => g.eff(s).name === 'Mega Zygarde ex' && g.toolRoom(s)) ? 10 : 0 });
+T('Crushing Hammer', { can: (g, p) => g.slots(g.opp(p)).some(s => s.energy.length), play: async (g, p) => { if (!await g.flipHeads(p, 1, 'Martillo Demoledor')) return; const o = g.opp(p); const opts = g.slots(o).filter(s => s.energy.length && !g.effectsBlocked(s, p)); if (!opts.length) return; const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Elige el Pokémon rival', options: opts, purpose: 'removeEnergy' }); const s = t || opts[0]; const [c] = s.energy.length === 1 ? s.energy.slice() : await g.ask(p, { kind: 'cards', title: 'Elige la Energía a descartar', cards: s.energy.slice(), min: 1, max: 1, purpose: 'discardOppEnergy', slot: s }); g.removeFrom(s.energy, c); g.toDiscard(c); g.log(`Se descarta ${g.cn(c)} de ${g.nm(s)}.`); }, ai: () => 6 });
+T('Energy Search', { play: async (g, p) => { await toHand(g, p, c => isBasicE(g, c), 1, 'Busca 1 Energía básica', 'getEnergy'); }, ai: (g, p) => !p.hand.some(c => g.isEnergy(c)) && !p.energyPlayed ? 9 : 0 });
+T('Energy Swatter', { can: (g, p) => g.opp(p).hand.length > 0, play: async (g, p) => { const o = g.opp(p); const cs = o.hand.filter(c => g.isEnergy(c)); g.log(`${o.name} muestra su mano.`); if (!cs.length) return; const [c] = cs.length === 1 ? cs : await g.ask(p, { kind: 'cards', title: 'Matamoscas de Energía: elige la Energía que va al fondo del mazo', cards: cs, min: 1, max: 1, purpose: 'discardOppHand' }); g.removeFrom(o.hand, c); o.deck.unshift(c); g.log(`${g.cn(c)} va al fondo del mazo de ${o.name}.`); }, ai: (g, p) => g.opp(p).hand.length >= 4 ? 5 : 0 });
+T('Hole-Digging Shovel', { play: async (g, p) => { discardTop(g, p, 2); }, ai: () => 0 });
+T('Jacinthe', { can: (g, p) => g.slots(p).some(s => hasType(g, s, 'P') && s.dmg > 0), play: async (g, p) => { const opts = g.slots(p).filter(s => hasType(g, s, 'P') && s.dmg > 0); const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Jacinthe: cura 150 a un Pokémon Psíquico', options: opts, purpose: 'healOwn' }); const s = t || opts[0]; const h = g.heal(s, 150); g.log(`${g.nm(s)} se cura ${h}.`); }, ai: (g, p) => g.slots(p).some(s => hasType(g, s, 'P') && s.dmg >= 100) ? 14 : 0 });
+T('Judge', { play: async (g, p) => { for (const pl of [p, g.opp(p)]) { pl.deck.push(...pl.hand.splice(0)); g.shuffleDeck(pl); g.draw(pl, 4); } g.log('Cada jugador baraja su mano en el mazo y roba 4 cartas.'); }, ai: (g, p) => g.opp(p).hand.length >= 6 && p.hand.length <= 4 ? SUP : p.hand.length <= 2 ? 10 : 0 });
+T('Lumiose City', { stadium: true, once: true, action: async (g, p) => { await toBench(g, p, c => isBasicMon(g, c), 1, 'Ciudad Luminalia: busca 1 Pokémon Básico'); p.turnOver = true; g.log(`El turno de ${p.name} termina.`); }, actionLabel: 'Ciudad Luminalia (termina el turno)', actionCan: (g, p) => benchRoom(g, p) > 0 && p.deck.some(c => isBasicMon(g, c)), ai: (g, p) => benchRoom(g, p) >= 3 && !g.stadiumIs('Lumiose City') ? 4 : 0, aiAction: (g, p) => p.bench.length < 2 && !(p.active && (() => { const b = PT.AI.bestAttack(g, p, p.active, g.opp(p).active); return b && b.miss === 0; })()) });
+T('Lumiose Galette', { can: (g, p) => p.active && (p.active.dmg > 0 || hasSC(p.active)), play: async (g, p) => { const s = p.active; g.heal(s, 20); g.cure(s); g.log(`${g.nm(s)} se cura 20 y se recupera de sus Estados Especiales.`); }, ai: (g, p) => p.active && (hasSC(p.active) || p.active.dmg >= 20) ? 7 : 0 });
+T('Naveen', { can: (g, p) => p.deck.length > 0, play: async (g, p, c) => { const cs = p.hand.filter(h => h !== c); if (cs.length) { const sel = await g.ask(p, { kind: 'cards', title: 'Naveen: puedes descartar cartas antes de robar', cards: cs, min: 0, max: cs.length, purpose: 'discardHand' }); for (const h of sel) { g.removeFrom(p.hand, h); g.toDiscard(h); } } drawTo(g, p, 5); }, ai: (g, p) => p.hand.length <= 3 ? SUP - 2 : 0 });
+T('Poké Ball', { play: async (g, p) => { if (await g.flipHeads(p, 1, 'Poké Ball')) await toHand(g, p, c => isMon(g, c), 1, 'Busca 1 Pokémon'); }, ai: (g, p) => wantMon(g, p) ? 6 : 0 });
+T('Pokémon Catcher', { can: (g, p) => g.opp(p).bench.length > 0, play: async (g, p) => { if (await g.flipHeads(p, 1, 'Cazador Pokémon')) await gust(g, p, g.opp(p)); }, ai: (g, p) => bossValue(g, p) ? 9 : 0 });
+T('Potion', { can: (g, p) => g.slots(p).some(s => s.dmg > 0), play: async (g, p) => { const opts = g.slots(p).filter(s => s.dmg > 0); const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Poción: cura 30', options: opts, purpose: 'healOwn' }); const s = t || opts[0]; g.heal(s, 30); g.log(`${g.nm(s)} se cura 30.`); }, ai: (g, p) => g.slots(p).some(s => s.dmg >= 30 && g.hpLeft(s) <= 60) ? 7 : 0 });
+T("Rosa's Encouragement", { can: (g, p) => p.prizes.length > g.opp(p).prizes.length && p.discard.some(c => isBasicE(g, c)) && g.slots(p).some(s => g.baseDef(s).stage === 2), play: async (g, p) => { const opts = g.slots(p).filter(s => g.baseDef(s).stage === 2); const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Ánimo de Rosa: elige un Pokémon de Fase 2', options: opts, purpose: 'energyTarget' }); const cs = p.discard.filter(c => isBasicE(g, c)); const sel = cs.length <= 2 ? cs : await g.ask(p, { kind: 'cards', title: 'Elige hasta 2 Energías básicas', cards: cs, min: 1, max: 2, purpose: 'getEnergy' }); for (const c of sel) { g.removeFrom(p.discard, c); attachCard(g, p, c, t || opts[0]); } }, ai: () => 14 });
+T('Tarragon', { can: (g, p) => p.discard.some(c => (isMon(g, c) && def(g, c).types.includes('F')) || isBasicE(g, c, 'F')), play: async (g, p) => { p.used.tarragon = true; const cs = p.discard.filter(c => (isMon(g, c) && def(g, c).types.includes('F')) || isBasicE(g, c, 'F')); const sel = cs.length <= 4 ? cs : await g.ask(p, { kind: 'cards', title: 'Estragón: elige hasta 4 cartas', cards: cs, min: 1, max: 4, purpose: 'recover' }); for (const c of sel) { g.removeFrom(p.discard, c); p.hand.push(c); } g.log(`${sel.length} carta(s) vuelven a la mano.`); }, ai: (g, p) => p.discard.filter(c => isMon(g, c) || isBasicE(g, c, 'F')).length >= 3 ? 10 : 0 });
+T('Energy Recycler', { can: (g, p) => p.discard.some(c => isBasicE(g, c)), play: async (g, p) => { const cs = p.discard.filter(c => isBasicE(g, c)); const sel = cs.length <= 5 ? cs : await g.ask(p, { kind: 'cards', title: 'Reciclador de Energía: elige hasta 5', cards: cs, min: 1, max: 5, purpose: 'recover' }); for (const c of sel) { g.removeFrom(p.discard, c); p.deck.push(c); } g.shuffleDeck(p); g.log(`${sel.length} Energía(s) vuelven al mazo.`); }, ai: (g, p) => p.deck.length < 15 && p.discard.filter(c => isBasicE(g, c)).length >= 3 ? 6 : 0 });
+T('Sacred Ash', { can: (g, p) => p.discard.some(c => isMon(g, c)), play: async (g, p) => { const cs = p.discard.filter(c => isMon(g, c)); const sel = cs.length <= 5 ? cs : await g.ask(p, { kind: 'cards', title: 'Ceniza Sagrada: elige hasta 5 Pokémon', cards: cs, min: 1, max: 5, purpose: 'recover' }); for (const c of sel) { g.removeFrom(p.discard, c); p.deck.push(c); } g.shuffleDeck(p); g.log(`${sel.length} Pokémon vuelven al mazo.`); }, ai: (g, p) => p.discard.filter(c => isMon(g, c)).length >= 3 ? 7 : 0 });
+T('Backtrack Badge', { tool: true, ai: () => 0 });
+T('Dark Bell', { play: async (g, p) => { for (const pl of [p, g.opp(p)]) { const a = pl.active; if (a && !hasType(g, a, 'D') && !(pl !== p && g.effectsBlocked(a, p))) g.setStatus(a, 'confused'); } }, ai: (g, p) => p.active && hasType(g, p.active, 'D') && g.opp(p).active && !hasType(g, g.opp(p).active, 'D') ? 7 : 0 });
+T('Fossil Quarry', { stadium: true, once: true, action: async (g, p) => { const room = benchRoom(g, p); const sel = await search(g, p, c => !!def(g, c).fossilMon, Math.min(2, room), 'Cantera de Fósiles: busca hasta 2 Fósiles Antiguos', { purpose: 'searchBasic' }); for (const c of sel) await benchCard(g, p, c); }, actionLabel: 'Cantera de Fósiles', actionCan: (g, p) => benchRoom(g, p) > 0 && p.deck.some(c => def(g, c).fossilMon), ai: (g, p) => p.deck.some(c => def(g, c).fossilMon) && !g.stadiumIs('Fossil Quarry') ? 8 : 0, aiAction: () => true });
+T("Gladion's Final Battle", { can: (g, p, c) => p.hand.length === 1 && p.hand[0] === c, play: async (g, p) => { p.flags.gladion = { until: g.turnNo }; g.log('Este turno los ataques de tus Pokémon sin Regla hacen 80 de daño más al Pokémon Activo rival.'); }, ai: (g, p) => p.active && !ruleBox(g, p.active) ? 16 : 0 });
+T('Gwynn', { can: (g, p) => p.hand.some(c => isMon(g, c) && !def(g, c).ex), play: async (g, p) => { const cs = p.hand.filter(c => isMon(g, c) && !def(g, c).ex); const sel = await g.ask(p, { kind: 'cards', title: 'Gwynn: descarta hasta 2 Pokémon sin Regla (3 cartas por cada uno)', cards: cs, min: 1, max: Math.min(2, cs.length), purpose: 'discardHand' }); for (const c of sel) { g.removeFrom(p.hand, c); g.toDiscard(c); } drawN(g, p, 3 * sel.length); }, ai: (g, p) => p.hand.length <= 5 ? 12 : 4 });
+T('Jett', { can: (g, p) => g.slots(g.opp(p)).some(s => isMegaEx(g, s)), play: async (g, p) => { drawN(g, p, g.slots(g.opp(p)).filter(s => isMegaEx(g, s)).length); }, ai: (g, p) => p.hand.length <= 4 ? 8 : 0 });
+T("Misty's Vitality", { play: async (g, p) => { const sel = await search(g, p, c => isBasicE(g, c, 'W'), 4, 'Vitalidad de Misty: busca hasta 4 Energías Agua', { purpose: 'getEnergy' }); if (sel.length) { const t = await g.ask(p, { kind: 'slot', title: '¿A qué Pokémon unes las Energías Agua?', options: g.slots(p), purpose: 'energyTarget' }); for (const c of sel) attachCard(g, p, c, t || p.active); } p.turnOver = true; g.log(`El turno de ${p.name} termina.`); }, ai: (g, p) => g.slots(p).some(s => hasType(g, s, 'W') && (() => { const b = PT.AI.bestAttack(g, p, s, null); return b && b.miss >= 2; })()) && p.attacked === false && !(p.active && (() => { const b = PT.AI.bestAttack(g, p, p.active, g.opp(p).active); return b && b.miss === 0; })()) ? 9 : 0 });
+T('Rust Syndicate Grunt', { can: (g, p) => koLast(g, p) && g.slots(g.opp(p)).some(s => s.energy.length), play: async (g, p) => { const o = g.opp(p); const opts = g.slots(o).filter(s => s.energy.length && !g.effectsBlocked(s, p)); if (!opts.length) return; const t = opts.length === 1 ? opts[0] : await g.ask(p, { kind: 'slot', title: 'Elige el Pokémon rival', options: opts, purpose: 'removeEnergy' }); const s = t || opts[0]; const [c] = s.energy.length === 1 ? s.energy.slice() : await g.ask(p, { kind: 'cards', title: 'Elige la Energía a descartar', cards: s.energy.slice(), min: 1, max: 1, purpose: 'discardOppEnergy', slot: s }); g.removeFrom(s.energy, c); g.toDiscard(c); g.log(`Se descarta ${g.cn(c)} de ${g.nm(s)}.`); }, ai: () => 9 });
+T('Tremendous Bomb', { tool: true, ai: (g, p) => p.active && !isMegaEx(g, p.active) && g.toolRoom(p.active) && isMegaEx(g, g.opp(p).active) ? 9 : 0 });
+T('Brave Bangle', { tool: true, ai: (g, p) => p.active && !ruleBox(g, p.active) && g.toolRoom(p.active) ? 7 : 0 });
+
 // ================= GANCHOS DEL MOTOR (reglas modernas) =================
 const HOOKS = PT.MEGA_HOOKS = {
   tokens(g, s) {
@@ -345,16 +694,41 @@ const HOOKS = PT.MEGA_HOOKS = {
     return t;
   },
   retreat(g, s, c) {
+    if (g.eff(s).trainerMon) return 99;
     if (ab(g, s, 'Agile') && !s.energy.length) return 0;
-    c -= 2 * s.att.filter(x => g.def(x).name === 'Air Balloon').length;
+    if (ab(g, s, 'Melt Away') && !s.energy.length) return 0;
+    if (!g.stadiumIs('Jamming Tower')) c -= 2 * s.att.filter(x => g.def(x).name === 'Air Balloon').length;
     if (s.fx.retreatPlus) c += 1;
+    const o = g.opp(g.ownerOf(s));
+    if (g.isActive(s) && o.active && ab(g, o.active, 'Binding Flame')) c += 1;
     return c;
   },
   toolMax(g, s) { const p = g.ownerOf(s); return g.eff(s).name.includes('Rotom') && g.slots(p).some(x => ab(g, x, 'Multi Adapter')) ? 2 : 1; },
+  effMod(g, s, e) {
+    const d = e.d; if (!d || d.st !== 'P') return;
+    if (d.pw && d.pw.name === 'M:Double Type' && g.powerOn(s)) e.types = ['F', 'P'];
+    if (d.pw && d.pw.name === 'M:Tyrannically Gutsy' && g.powerOn(s) && s.energy.some(c => !g.def(c).basic)) e.hp += 150;
+    if (e.name === 'Mega Zygarde ex' && toolOn(g, s, 'Core Memory')) { const cm = s.att.find(c => g.def(c).name === 'Core Memory'); const cd = g.def(cm); (cd.atk || []).forEach((a, i) => e.atk.push(Object.assign({ src: cd.id, idx: i, tm: true }, a))); }
+    if (e.types.includes('N')) { const o = g.opp(g.ownerOf(s)); if (g.slots(o).some(x => x !== s && g.baseDef(x).pw && g.baseDef(x).pw.name === 'M:Fairy Zone' && g.powerOn(x))) e.weak = 'P'; }
+  },
+  powerOff(g, s, d) { return g.stadiumIs("Team Rocket's Watchtower") && d.st === 'P' && d.types.includes('C'); },
+  canAttack(g, p, s, a) {
+    if (ab(g, s, 'Power Saver') && countNamed(g, p, "Team Rocket's") < 4) return 'Ahorro de Energía: necesitas 4 Pokémon del Team Rocket en juego';
+    return null;
+  },
+  cost(g, s, a, c) {
+    const p = g.ownerOf(s), o = g.opp(p); let cost = c;
+    if (ab(g, s, "Sniper's Eye") && o.hand.length === 4) cost = cost.filter(x => x !== 'C');
+    if (toolOn(g, s, 'Counter Gain') && p.prizes.length > o.prizes.length) { const i = cost.lastIndexOf('C'); if (i >= 0) cost = cost.slice(0, i).concat(cost.slice(i + 1)); }
+    if (g.stadiumIs('Nighttime Mine') && isTera(g, s)) cost = cost.concat(['C']);
+    return cost;
+  },
   async onSwitch(g, p, old, neu, why) {
     if (!neu) return;
-    // Remolino de Prosa (Mismagius ex del rival en el Puesto Activo)
     const o = g.opp(p);
+    // Hoyos (Dugtrio del Team Rocket): el Activo del rival pasa a la Banca durante su turno
+    if (old && g.cur === p.i && g.slots(o).some(z => ab(g, z, 'Holes')) && !ab(g, old, "Hide 'n' Sneak") && !ab(g, old, 'Luminous Wing')) { old.dmg += 20; g.log(`Hoyos pone 2 contadores en ${g.nm(old)}.`); }
+    // Remolino de Prosa (Mismagius ex del rival en el Puesto Activo)
     if (old && g.cur === p.i && o.active && ab(g, o.active, 'Swirling Prose')) { g.log('Remolino de Prosa confunde al nuevo Pokémon Activo.'); g.setStatus(neu, 'confused'); }
     if (g.cur !== p.i) return;
     // Recarga en Retirada (Clawitzer pasa a la Banca)
@@ -373,10 +747,21 @@ const HOOKS = PT.MEGA_HOOKS = {
     }
   },
   async onKO(g, s, x, pl) {
+    const byAtk = x && pl.i !== g.cur;
+    if (byAtk) { const nm = g.eff(s).name; if (pl.koList && pl.koList.t === g.turnNo) pl.koList.n.push(nm); else pl.koList = { t: g.turnNo, n: [nm] }; }
+    else if (pl.i !== g.cur) { if (!(pl.koList && pl.koList.t === g.turnNo)) pl.koList = { t: g.turnNo, n: [g.eff(s).name] }; }
     if (x && pl.i !== g.cur && pl.active === s && ab(g, s, 'Sandy Flapping') && await g.ask(pl, { kind: 'yesno', title: '¿Usar Aleteo Arenoso (descartar 2 cartas del mazo rival)?', purpose: 'yes' })) discardTop(g, g.opp(pl), 2);
+    if (!byAtk) return;
+    if (ab(g, s, 'Final Chain')) { g.log('Cadena Final.'); await toHand(g, pl, () => true, 1, 'Cadena Final: busca 1 carta', 'searchAny'); }
+    if (ab(g, s, 'Infinite Shadow')) { s.cards[s.cards.length - 1].koToHand = true; g.log('Sombra Infinita: Gengar vuelve a la mano.'); }
+    if (ab(g, s, 'Photon Cord') && pl.active === s && pl.bench.length) {
+      const cs = s.energy.filter(c => isBasicE(g, c, 'L')).slice(0, 2);
+      if (cs.length && await g.ask(pl, { kind: 'yesno', title: `Cable Fotónico: ¿mover ${cs.length} Energía(s) Rayo a la Banca?`, purpose: 'yes' })) { const t = await g.ask(pl, { kind: 'slot', title: '¿A qué Pokémon en Banca?', options: pl.bench.slice(), purpose: 'energyTarget' }); for (const c of cs) { g.removeFrom(s.energy, c); (t || pl.bench[0]).energy.push(c); } g.log(`Cable Fotónico mueve ${cs.length} Energía(s) Rayo.`); }
+    }
   },
-  async onBench(g, p, s) {
+  async onBench(g, p, s, fromEffect) {
     if (g.stadiumIs('Risky Ruins') && g.cur === p.i && g.baseDef(s).stage === 0 && !hasType(g, s, 'D')) { s.dmg += 20; g.log(`Ruinas Peligrosas ponen 2 contadores en ${g.nm(s)}.`); }
+    if (!fromEffect && g.cur === p.i && ab(g, s, 'Last-Ditch Catch') && !p.used.lastDitch && p.deck.some(c => (def(g, c).sub || []).includes('Supporter')) && await g.ask(p, { kind: 'yesno', title: '¿Usar la habilidad Atrapada de Último Momento (buscar 1 Partidario)?', purpose: 'yes' })) { p.used.lastDitch = true; await toHand(g, p, c => (def(g, c).sub || []).includes('Supporter'), 1, 'Busca 1 carta de Partidario'); }
   },
   async onEvolve(g, p, s, c) {
     const fromHand = !c.fromDeckEvo; delete c.fromDeckEvo;
@@ -390,19 +775,35 @@ const HOOKS = PT.MEGA_HOOKS = {
   },
   async endTurn(g, p) {
     for (const s of g.slots(p)) for (const c of s.energy.slice()) if (g.def(c).name === 'Ignition Energy') { g.removeFrom(s.energy, c); g.toDiscard(c); g.log('Se descarta la Energía Ignición.'); }
+    // Beso Intenso (Jynx): al final del turno del rival se descarta el Pokémon marcado
+    for (const s of g.slots(p).slice()) if (s.fx.kiss) { const wasA = p.active === s; g.log(`Beso Intenso: se descarta ${g.nm(s)} y sus cartas.`); g.discardSlot(s); if (wasA) { if (!p.bench.length) g.win(1 - p.i, `${p.name} no tiene Pokémon en juego.`); await needActive(g, p); } }
   },
   async afterAttack(g, x) {
     const p = x.me, o = x.op; const s = x.att;
-    for (const [t, d] of x.damaged) {
-      if (t.owner === p.i || d <= 0 || !t.wasActiveHit) continue;
-    }
-    const t = x.target; if (!t || t.owner === p.i || !x.damaged.some(([dd, n]) => dd === t && n > 0)) return;
+    const t = x.target; if (!t || t.owner === p.i) return;
+    const hit = x.damaged.find(([dd, n]) => dd === t && n > 0); if (!hit) return;
     if (!g.slots(p).includes(s)) return;
     const wasDefActive = x.def === t;
-    if (wasDefActive && hasType(g, t, 'D')) {
-      if (g.slots(o).some(z => ab(g, z, 'Spiteful Swirl'))) { s.dmg += 10; g.log(`Remolino Rencoroso pone 1 contador en ${g.nm(s)}.`); }
-      if (t.att.some(c => g.def(c).name === 'Punk Helmet')) { s.dmg += 40; g.log(`El Casco Punk pone 4 contadores en ${g.nm(s)}.`); }
+    if (!wasDefActive) return;
+    const put = (n, why) => { if (!g.slots(p).includes(s) || n <= 0) return; s.dmg += 10 * n; g.log(`${why} pone ${n} contador(es) en ${g.nm(s)}.`); };
+    if (hasType(g, t, 'D')) {
+      if (g.slots(o).some(z => ab(g, z, 'Spiteful Swirl'))) put(1, 'Remolino Rencoroso');
+      if (toolOn(g, t, 'Punk Helmet')) put(4, 'El Casco Punk');
     }
+    if (ab(g, t, 'Counterattack Quills')) put(3, 'Púas Contraataque');
+    if (ab(g, t, 'Counterattacking Crest')) put(5, 'Cresta Contraataque');
+    if (t.fx.shellnado) put(12, 'Giro Caparazón');
+    if (ab(g, t, 'Incandescent Body')) g.setStatus(s, 'burned');
+    if (named(g, t, "Team Rocket's") && toolOn(g, t, "Team Rocket's Hypnotizer")) g.setStatus(s, 'asleep');
+    if (ab(g, t, 'Shell Spikes') && s.energy.length) { const [c] = s.energy.length === 1 ? s.energy.slice() : await g.ask(o, { kind: 'cards', title: 'Púas de Caparazón: elige la Energía del atacante a descartar', cards: s.energy.slice(), min: 1, max: 1, purpose: 'discardOppEnergy', slot: s }); g.removeFrom(s.energy, c); g.toDiscard(c); g.log(`Púas de Caparazón descarta ${g.cn(c)}.`); }
+    const bomb = toolOn(g, t, 'Tremendous Bomb') && t.att.find(c => g.def(c).name === 'Tremendous Bomb');
+    if (bomb && !isMegaEx(g, t) && isMegaEx(g, s) && hit[1] >= 240) { put(12, 'La Bomba Tremenda'); g.discardAtt(t, bomb); }
+  },
+  async survive(g, t, x, o) { // sobrevivir a un K.O. por daño de ataque
+    if (!x || !x.att || t.owner === x.me.i) return false;
+    if (ab(g, t, 'Resolute Heart') && t._preX === x && t._pre === 0) { t.dmg = g.hp(t) - 10; g.log(`Corazón Resuelto: ${g.nm(t)} resiste con 10 PS.`); return true; }
+    for (const n of ['Tenacious Body', 'Durable Body']) if (ab(g, t, n)) { if (await g.flipHeads(o, 1, n === 'Tenacious Body' ? 'Cuerpo Tenaz' : 'Cuerpo Resistente')) { t.dmg = g.hp(t) - 10; g.log(`${g.nm(t)} resiste con 10 PS.`); return true; } }
+    return false;
   },
   preWR(g, x, target, d) { // bonos/penalizaciones del atacante antes de Debilidad y Resistencia (al Activo rival)
     if (!x || !x.att) return 0;
@@ -411,30 +812,52 @@ const HOOKS = PT.MEGA_HOOKS = {
     if (hasType(g, s, 'F')) { b += 30 * Math.min(1, anyAb(g, p, 'Powerful a-Salt').length); if (p.flags.ppp === g.turnNo) b += 30; }
     if (ab(g, s, 'Excited Power') && megaInPlay(g, p, 'D')) b += 120;
     const o = x.op; if (o.active && ab(g, o.active, 'Intimidating Fang') && target === o.active) b -= 30;
+    if (ab(g, s, 'Supreme Overlord')) b += 30 * prizesTaken(o);
+    const ex = isEx(g, target);
+    if (ex && g.eff(s).name === 'Pikachu ex' && toolOn(g, s, 'Light Ball')) b += 50;
+    if (ex && p.flags.blackBelt) b += 40;
+    if (ex && !ruleBox(g, s) && toolOn(g, s, 'Brave Bangle')) b += 30;
+    if (p.flags.gladion && !ruleBox(g, s)) b += 80;
+    if (s.fx.rowdy && s.fx.rowdy.v < g.turnNo) b += 150;
     return b;
   },
   postWR(g, x, t, d) { // reducciones del Pokémon que recibe el daño (después de D y R)
     if (!x || !x.att || d <= 0) return d;
     const s = x.att; const tp = g.ownerOf(t);
+    if (x.immune && t._preX !== x) { t._preX = x; t._pre = t.dmg; }
+    if (t.fx.vuln) d += t.fx.vuln.v;
     if (t.fx.basicShield && g.baseDef(s).stage === 0) return 0;
+    if (t.fx.basicNonC && g.baseDef(s).stage === 0 && !hasType(g, s, 'C')) return 0;
+    if (t.fx.evoShield && isEvo(g, s)) return 0;
+    if (t.fx.burnShield && s.burn) return 0;
     if (t.fx.acerola && isEx(g, s)) return 0;
+    if (tp.bench.some(z => ab(g, z, 'Ancient Bulwark')) && g.energyTokens(s).length <= 2 && s.owner !== t.owner) return 0;
+    if (t.fx.evoReduce && isEvo(g, s)) d -= 100;
     if (ab(g, t, 'Diamond Coat')) d -= 30;
     if (ab(g, t, 'Thick Fat') && (hasType(g, s, 'R') || hasType(g, s, 'W'))) d -= 30;
     if (tp.flags.ironDef && hasType(g, t, 'M')) d -= 30;
-    if (t.att.some(c => g.def(c).name === 'Sacred Charm') && g.baseDef(s).pw) d -= 30;
+    if (toolOn(g, t, 'Sacred Charm') && g.baseDef(s).pw) d -= 30;
+    if (toolOn(g, t, 'Thick Scale') && hasType(g, t, 'N') && ['G', 'R', 'W', 'L'].some(y => hasType(g, s, y))) d -= 50;
+    if (g.energyCardsOf(t, 'W').length && g.slots(tp).some(z => ab(g, z, 'Tundra Wall'))) d -= 50;
     return Math.max(0, d);
   },
   prizes(g, s, x, n, pl) {
-    if (!x || pl.i === g.cur || !x.att) return n;
+    const taker = g.opp(pl);
+    const rec = k => { if (taker.prizeT === g.turnNo) taker.prizeN = (taker.prizeN || 0) + k; else { taker.prizeT = g.turnNo; taker.prizeN = k; } return k; };
+    if (!x || pl.i === g.cur || !x.att) return rec(n);
     const att = x.att;
-    if (isEx(g, att) && ab(g, s, 'Fragile Husk')) { g.log('Caparazón Frágil: el rival no toma cartas de Premio.'); return 0; }
-    if (isEx(g, att) && hasType(g, s, 'D') && g.slots(pl).some(z => z !== s && ab(g, z, 'Shadowy Concealment')) ) { g.log('Ocultación Sombría: el rival toma 1 carta de Premio menos.'); return Math.max(0, n - 1); }
-    if (isEx(g, att) && hasType(g, s, 'D') && ab(g, s, 'Shadowy Concealment')) { g.log('Ocultación Sombría: el rival toma 1 carta de Premio menos.'); return Math.max(0, n - 1); }
-    return n;
+    if (isEx(g, att) && ab(g, s, 'Fragile Husk')) { g.log('Caparazón Frágil: el rival no toma cartas de Premio.'); return rec(0); }
+    if (isEx(g, att) && hasType(g, s, 'D') && g.slots(pl).some(z => z !== s && ab(g, z, 'Shadowy Concealment'))) { g.log('Ocultación Sombría: el rival toma 1 carta de Premio menos.'); return rec(Math.max(0, n - 1)); }
+    if (isEx(g, att) && hasType(g, s, 'D') && ab(g, s, 'Shadowy Concealment')) { g.log('Ocultación Sombría: el rival toma 1 carta de Premio menos.'); return rec(Math.max(0, n - 1)); }
+    const wasActive = x.def === s;
+    if (wasActive && taker.flags.anthea && named(g, att, "N's")) { g.log('Antea y Concordia: 3 cartas de Premio más.'); n += 3; }
+    if (wasActive && g.slots(taker).some(z => ab(g, z, 'Wonder Kiss')) && taker.wonderT !== g.turnNo) { taker.wonderT = g.turnNo; const h = g.rnd() < 0.5; g.log(`Beso Maravilla: ${h ? 'cara, toma 1 carta de Premio más' : 'cruz'}.`); if (h) n += 1; }
+    return rec(n);
   },
   effectsBlocked(g, t, by) {
     if (!t || !by || t.owner === by.i) return false;
     if (ab(g, t, "Emperor's Stance")) return true;
+    if (ab(g, t, "Hide 'n' Sneak")) return true;
     if (t.fx.acerola && by.active && isEx(g, by.active)) return true;
     return false;
   },
