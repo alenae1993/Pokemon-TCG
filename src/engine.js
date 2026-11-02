@@ -86,7 +86,7 @@ class Game {
   opp(p) { return this.p[1 - p.i]; }
   log(m) { this.logs.push(m); if (this.io.log) this.io.log(this, m); }
   upd() { if (this.io.update) this.io.update(this); }
-  async ask(p, req) { req.player = p; if (p.ai) return (p.ai.mod || this.ai).decide(this, p, req); return this.io.ask(this, p, req); }
+  async ask(p, req) { req.player = p; if (p.ai) { try { return await (p.ai.mod || this.ai).decide(this, p, req); } catch (err) { if (err instanceof GameOver) throw err; console.error(err); return this.aiFallback(req); } } return this.io.ask(this, p, req); }
   check() { if (this.winner != null) throw new GameOver(this.winner); }
 
   // ---------- monedas ----------
@@ -359,6 +359,7 @@ class Game {
   shuffleSlotIntoDeck(slot) { const p = this.ownerOf(slot); this.removeSlot(slot); for (const c of this.slotCards(slot)) { if (c.buzzap) { delete c.buzzap; } this.p[c.owner].deck.push(c); } shuffle(p.deck, this.rnd); }
   returnSlotToHand(slot, energyToo = true) { const p = this.ownerOf(slot); this.removeSlot(slot); for (const c of slot.cards) p.hand.push(c); for (const c of slot.energy) { if (energyToo && !c.buzzap) p.hand.push(c); else { delete c.buzzap; this.toDiscard(c); } } for (const c of slot.att) this.toDiscard(c); }
   draw(p, n = 1) { let k = 0; while (k < n && p.deck.length) { p.hand.push(p.deck.pop()); k++; } if (k && this.turnNo > 0) this.evS('draw', { p, n: k }); return k; }
+  aiFallback(req) { if (req.kind === 'yesno') return false; if (req.kind === 'option') return 0; if (req.kind === 'type') return (req.only || ['C'])[0]; if (req.kind === 'slot') return req.optional ? null : (req.options || [])[0] || null; if (req.kind === 'slots') return (req.options || []).slice(0, req.min || 0); if (req.kind === 'order') return (req.cards || []).slice(); if (req.kind === 'cards') return (req.cards || []).slice(0, req.min || 0); return null; }
   async ev(type, d) { if (this.io && this.io.event) { try { await this.io.event(this, type, d); } catch (e) { if (e instanceof GameOver) throw e; } } }
   evS(type, d) { if (this.io && this.io.eventSync) { try { this.io.eventSync(this, type, d); } catch (e) {} } }
   shuffleDeck(p) { shuffle(p.deck, this.rnd); }
@@ -554,7 +555,7 @@ class Game {
     // devolver mano apartada (Máquina de Cosquillas) – se devuelve al final de su turno
     this.upd();
     p.turnOver = false;
-    if (p.ai) await (p.ai.mod || this.ai).takeTurn(this, p);
+    if (p.ai) { try { await (p.ai.mod || this.ai).takeTurn(this, p); } catch (err) { if (err instanceof GameOver) throw err; console.error(err); this.log('(La IA tuvo un error y termina su turno.)'); } }
     else await this.io.humanTurn(this, p);
     this.check();
     await this.endTurn(p);

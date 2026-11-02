@@ -351,36 +351,7 @@ async function maybeRetreat(g, p) {
   const lostOk = g.modern ? (cost <= 2 || (danger && pricey && cost <= 3)) : (cost === 0 || (cost === 1 && (cur <= 0 || danger)) || (cost === 2 && cur <= 0 && danger && pricey));
   if (should && lostOk) await g.retreat(p, bestB);
 }
-async function attachOld(g, p) {
-  const o = g.opp(p);
-  const en = p.hand.filter(c => g.isEnergy(c));
-  if (!en.length || p.energyPlayed) return;
-  let best = null, bv = -1e9;
-  for (const c of en) for (const s of g.slots(p)) {
-    if (!g.canAttach(p, c, s)) continue;
-    const tok = g.energyTokens(s); const add = tokOf(g, c);
-    const e = g.eff(s); if (!e.atk.length) continue;
-    const before = Math.min(...e.atk.map(a => deficit(tok, a.cost)));
-    const after = Math.min(...e.atk.map(a => deficit(tok.concat(add), a.cost)));
-    const maxCost = Math.max(...e.atk.map(a => a.cost.length));
-    let v = (before - after) * 30;
-    const enablesNow = g.isActive(s) && before > 0 && after === 0;
-    if (enablesNow) v += 100;
-    if (g.isActive(s)) v += 15;
-    if (before === 0 && tok.length >= maxCost) v -= 40;
-    if (e.types.includes(add[0])) v += 6;
-    if (g.def(c).name === 'Rainbow Energy' && g.hpLeft(s) <= 10) v -= 200;
-    // preferir guardar DCE para Pokémon que lo necesitan
-    if (g.def(c).name === 'Double Colorless Energy' && (before - after) < 2) v -= 10;
-    // evoluciones en mano para esta línea
-    if (p.hand.some(h => g.def(h).from === g.baseDef(s).name)) v += 10;
-    v += s.cards.length * 3 + Math.min(g.hpLeft(s), 100) / 20;
-    if (v > bv) { bv = v; best = [c, s]; }
-  }
-  if (best && bv > -20) await g.attach(p, best[0], best[1]);
-}
 async function attachBest(g, p) {
-  if (!g.modern && process.env.EXP === 'attach') return attachOld(g, p);
   const o = g.opp(p);
   const en = p.hand.filter(c => g.isEnergy(c));
   if (!en.length || p.energyPlayed) return;
