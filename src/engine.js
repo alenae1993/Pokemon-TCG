@@ -546,7 +546,7 @@ class Game {
     this.log(`— Turno ${this.turnNo}: ${p.name} —`);
     this.berries();
     if (!p.deck.length) this.win(o.i, `${p.name} no puede robar carta.`);
-    this.draw(p, 1);
+    this.draw(p, 1); this.log(`🎴 ${p.name} roba 1 carta al empezar su turno.`);
     if ((p.perk === 'sabrina' || p.perk === 'karen') && p.deck.length) { this.draw(p, 1); }
     // devolver mano apartada (Máquina de Cosquillas) – se devuelve al final de su turno
     this.upd();
@@ -566,6 +566,7 @@ class Game {
     }
   }
   async endTurn(p) {
+    if (this.winner == null) this.log(`⏹ ${p.name} termina su turno.`);
     const o = this.opp(p);
     // Energía Milagro y Lupa se descartan al final del turno de su dueño
     for (const s of this.slots(p)) {

@@ -15,7 +15,7 @@ if (MEGA) { try { document.querySelector('#topbar .brand').textContent = 'LIGA M
 const ENERGY_BASIC = MEGA ? C.ENERGY_BASIC : ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const ENERGY_ID = MEGA ? C.ENERGY_ID : P.Decks.ENERGY_ID;
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v16 · IA mejorada (energía, retiradas, objetivos y K.O. por premios)';
+const APP_VERSION = 'v17 · Avisos de combate (turnos, energía, entrenadores, ataques, premios y efectos)';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}
@@ -248,6 +248,7 @@ const NAV_CAMP = [['map', MEGA ? 'Entrenadores' : 'Mapa'], ['shop', 'Tienda'], [
 const NAV_MODE = { camp: NAV_CAMP, packs: [['shop', 'Abrir sobres'], ['coll', 'Colección'], ['opts', 'Opciones']], free: [['meta', 'Mazos meta'], ['decks', 'Mazos'], ['coll', 'Colección'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']] };
 const DEF_VIEW = { camp: 'map', packs: 'shop', free: 'meta' };
 function showHub(view) {
+  { const nb = document.getElementById('notif'); if (nb) nb.innerHTML = ''; }
   for (const s of document.querySelectorAll('.screen')) s.hidden = true;
   $('#hubscreen').hidden = false; if (view) curView = view; renderTop(); renderView();
 }
@@ -728,6 +729,7 @@ function viewOpts(v) {
   v.append(el('div', { class: 'panel', style: 'max-width:640px;display:flex;flex-direction:column;gap:12px' },
     el('h2', { class: 'cond', style: 'color:var(--gold)' }, 'Opciones'),
     el('label', { for: 'speed' }, 'Velocidad de la IA y las monedas: ', sp),
+    el('label', { for: 'notifsel' }, 'Avisos en combate: ', (() => { const ns = el('select', { id: 'notifsel', onchange: () => { S.opts.notif = ns.value; save(); } }, ...[['all', 'Todos los eventos'], ['key', 'Sólo los importantes'], ['off', 'Desactivados']].map(([x, t]) => el('option', { value: x, selected: ((S.opts.notif || 'all') === x) ? true : null }, t))); return ns; })()),
     el('div', {}, `Entrenador: ${S.name} · Victorias: ${S.stats.wins} · Derrotas: ${S.stats.losses}${S.champion ? ' · 👑 Campeón' : ''}`),
     el('div', { class: 'muted', style: 'font-size:13px' }, 'Versión del juego: ', el('b', { style: 'color:var(--gold)' }, APP_VERSION)),
     !window.claude ? el('div', {}, el('button', { onclick: forceUpdate }, '🔄 Buscar actualización')) : null,
@@ -791,8 +793,52 @@ function startBattle(spec, myDeck) {
   BT.g = g; render();
   g.run().then(w => spec.kind === 'meta' ? endBattleMeta(w) : MEGA ? endBattleMega(w) : endBattle(w)).catch(e => { console.error(e); toast('Error en la partida: ' + e.message, 5000); });
 }
+// ---------- avisos de combate ----------
+const SUBES = { Item: 'Objeto', Supporter: 'Partidario', Stadium: 'Estadio', 'Pokémon Tool': 'Herramienta', 'Technical Machine': 'MT' };
+const NOTIF_RULES = [
+  [/^— Turno/, 'turn'], [/^⏹/, 'end', '⏹️', 'Fin de turno'], [/^🏆/, 'win', '🏆', 'Fin de la partida'], [/^🪙|^🎲/, 'coin'],
+  [/^💥|Fuera de Combate/, 'ko', '☠️', 'Fuera de Combate'], [/de Premio/, 'prize', '🏅', 'Cartas de Premio'],
+  [/^⚔️/, 'atk', '⚔️', 'Ataque'],
+  [/[Ss]e descartan? .*Energ|descarta .*Energ/, 'edisc', '🔻', 'Energía descartada'],
+  [/no podrá|no puede|bloquea|protegido|no recibirá/, 'lock', '⛔', 'Efecto'],
+  [/une .*Energía|Energía.* (se une|pasa) a|Energías? .*(a la mano|al mazo|a la Banca)|mueve .*Energía/, 'energy', '⚡', 'Energía'],
+  [/ se une a /, 'tool', '🛠️', 'Herramienta'],
+  [/ juega /, 'trainer', '🃏', 'Entrenador'],
+  [/usa la habilidad|usa el Poder/, 'ability', '🔮', 'Habilidad'],
+  [/evoluciona|involuciona/, 'evolve', '✨', 'Evolución'],
+  [/roba \d+|roba \w+ carta|pone .* en su mano|vuelven? a (su |la )?mano/, 'draw', '🎴', 'Cartas a la mano'],
+  [/pasa a ser Activo|se retira/, 'switch', '🔄', 'Cambio de Activo'],
+  [/pone a .* en (juego|su Banca)/, 'bench', '📥', 'Pokémon en juego'],
+  [/de daño|contador/, 'damage', '💥', 'Daño'],
+  [/se cura|se recupera/, 'heal', '💚', 'Curación'],
+  [/ahora está|ya no está|Dormido|Paralizad|Confundid|Envenenad|Quemad/, 'status', '🌀', 'Estado especial'],
+  [/[Ee]stadio/, 'stadium', '🏟️', 'Estadio'],
+  [/descarta|Se descarta/, 'discard', '🗑️', 'Descarte'],
+  [/mazo/, 'deck', '📚', 'Mazo'],
+];
+const NOTIF_KEY = new Set(['turn', 'end', 'win', 'ko', 'prize', 'atk', 'energy', 'edisc', 'tool', 'trainer', 'ability', 'evolve', 'stadium']);
+function notifBox() { let b = $('#notif'); if (!b) { b = el('div', { id: 'notif', 'aria-live': 'polite' }); document.body.append(b); } return b; }
+function notify(g, m) {
+  const mode = (S && S.opts.notif) || 'all'; if (mode === 'off' || $('#battle').hidden) return;
+  const r = NOTIF_RULES.find(([re]) => re.test(m)) || [null, 'fx', '🔹', 'Efecto'];
+  let [, cat, icon, label] = r;
+  if (cat === 'coin') return; // las monedas ya tienen su animación
+  if (mode === 'key' && !NOTIF_KEY.has(cat)) return;
+  const mine = g.cur === ME();
+  if (cat === 'turn') {
+    const who = g.p[g.cur]; const t = el('div', { class: 'turnban ' + (mine ? 'me' : 'opp') }, mine ? '🔔 ¡Tu turno!' : `⏳ Turno de ${who.name}`, el('small', {}, `Turno ${g.turnNo}`));
+    document.body.append(t); setTimeout(() => t.classList.add('out'), 1100 * Math.max(0.6, speed())); setTimeout(() => t.remove(), 1500 * Math.max(0.6, speed())); return;
+  }
+  if (cat === 'trainer') { const nm = (m.match(/ juega (.+?)\.?$/) || [])[1]; const d = nm && P.CARDS.find(x => x.nameEs === nm && x.st === 'T'); if (d && d.sub && SUBES[d.sub[0]]) { label = SUBES[d.sub[0]]; icon = { Objeto: '🎒', Partidario: '🧑', Estadio: '🏟️', Herramienta: '🛠️', MT: '💿' }[label] || icon; } }
+  const txt = m.replace(/^(⚔️|💥|🏆|⏹|🛡|🎴|✨|🔮|⛔)\s*/u, '');
+  const box = notifBox();
+  const n = el('div', { class: `nt ${mine ? 'me' : 'opp'} c-${cat}` }, el('span', { class: 'ic' }, icon), el('div', {}, el('b', {}, label), el('span', {}, txt)));
+  box.append(n); while (box.children.length > 5) box.firstChild.remove();
+  const life = (['ko', 'prize', 'atk', 'win'].includes(cat) ? 3600 : 2600) * Math.max(0.7, speed());
+  setTimeout(() => n.classList.add('out'), life); setTimeout(() => n.remove(), life + 400);
+}
 const IO = {
-  log(g, m) { const L = $('#log'); const d = el('div', { class: m.startsWith('—') ? 't' : m.startsWith('💥') ? 'ko' : m.startsWith('🏆') ? 'win' : '' }, m); L.append(d); L.scrollTop = L.scrollHeight; },
+  log(g, m) { const L = $('#log'); const d = el('div', { class: m.startsWith('—') ? 't' : m.startsWith('💥') ? 'ko' : m.startsWith('🏆') ? 'win' : '' }, m); L.append(d); L.scrollTop = L.scrollHeight; try { notify(g, m); } catch (e) {} },
   update(g) { render(); },
   async aiDelay(ms) { render(); await sleep(ms * speed()); },
   async ask(g, p, req) {

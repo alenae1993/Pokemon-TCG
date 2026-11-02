@@ -12,7 +12,25 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}html{height:100%;overscroll-behavior:none}body{overscroll-behavior:none;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}input,textarea{-webkit-user-select:text;user-select:text}</style>
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}html{height:100%;overscroll-behavior:none}body{overscroll-behavior:none;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}input,textarea{-webkit-user-select:text;user-select:text}
+/* avisos de combate */
+#notif { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; gap: 6px; width: min(400px, 92vw); pointer-events: none; }
+@media (min-width: 900px) { #notif { left: calc(50% - 150px); } }
+#notif .nt { display: flex; gap: 10px; align-items: center; background: rgba(12,20,38,.93); border: 1px solid rgba(255,255,255,.12); border-left: 4px solid #4aa3ff; border-radius: 10px; padding: 7px 11px; box-shadow: 0 6px 18px rgba(0,0,0,.45); font-size: 13px; line-height: 1.25; animation: ntin .25s ease-out; transition: opacity .4s, transform .4s; }
+#notif .nt.opp { border-left-color: #ff5d5d; }
+#notif .nt b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--gold); }
+#notif .nt .ic { font-size: 20px; flex: none; }
+#notif .nt.c-ko, #notif .nt.c-prize { background: rgba(70,14,20,.95); }
+#notif .nt.c-atk { background: rgba(60,26,10,.95); }
+#notif .nt.c-win { background: rgba(70,56,8,.96); }
+#notif .nt.out, .turnban.out { opacity: 0; transform: translateY(-8px); }
+@keyframes ntin { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+.turnban { position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%); z-index: 70; pointer-events: none; padding: 16px 34px; border-radius: 16px; font: 800 30px/1.15 inherit; text-align: center; color: #fff; background: rgba(20,60,140,.93); box-shadow: 0 10px 40px rgba(0,0,0,.55); border: 2px solid var(--gold); animation: banin .3s ease-out; transition: opacity .35s; }
+.turnban.opp { background: rgba(130,26,30,.93); }
+.turnban small { display: block; font-size: 14px; font-weight: 600; opacity: .8; margin-top: 4px; }
+@keyframes banin { from { opacity: 0; transform: translate(-50%, -50%) scale(.85); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+.turnban.out { transform: translate(-50%, -50%) scale(.95); }
+</style>
 <title>Liga Kanto TCG</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap">
