@@ -7,15 +7,15 @@ const $ = (s, r = document) => r.querySelector(s);
 const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k === 'style') e.style.cssText = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v); } for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k))); return e; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const TYPES = { G: 'Planta', R: 'Fuego', W: 'Agua', L: 'Rayo', P: 'Psíquico', F: 'Lucha', C: 'Incoloro', N: 'Dragón', D: 'Siniestro', M: 'Metálico' };
-const RARES = { C: 'Común', U: 'Poco común', R: 'Rara', RH: 'Rara Holo', SH: 'Brillante', S: 'Secreta', E: 'Energía' , RR: 'Doble rara', IR: 'Ilustración rara', UR: 'Ultra rara', SIR: 'Ilustración especial rara', MHR: 'Mega hiper rara'};
-const RSYM = { C: '●', U: '◆', R: '★', RH: '★H', SH: '✦', S: '★S', E: '', RR: '★★', IR: '★I', UR: '★★★', SIR: '★IE', MHR: '★MH' };
+const RARES = { C: 'Común', U: 'Poco común', R: 'Rara', RH: 'Rara Holo', SH: 'Brillante', S: 'Secreta', E: 'Energía' , RR: 'Doble rara', IR: 'Ilustración rara', UR: 'Ultra rara', SIR: 'Ilustración especial rara', MHR: 'Mega hiper rara', MAR: 'Mega ataque rara' };
+const RSYM = { C: '●', U: '◆', R: '★', RH: '★H', SH: '✦', S: '★S', E: '', RR: '★★', IR: '★I', UR: '★★★', SIR: '★IE', MHR: '★MH', MAR: '★MA' };
 const BIGRARE = r => ['RH', 'S', 'SH', 'RR', 'IR', 'UR', 'SIR', 'MHR'].includes(r);
 const SETNAME = Object.fromEntries(C.SETS.map(s => [s.id, s.name])); if (MEGA) SETNAME.mee = 'Energía básica';
 if (MEGA) { try { document.querySelector('#topbar .brand').textContent = 'LIGA MEGA'; document.title = 'Liga Mega TCG'; } catch (e) {} }
 const ENERGY_BASIC = MEGA ? C.ENERGY_BASIC : ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const ENERGY_ID = MEGA ? C.ENERGY_ID : P.Decks.ENERGY_ID;
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v18.1 · Corrige la IA que se quedaba pegada en la era WOTC';
+const APP_VERSION = 'v19 · Era Mega: más dinero por victoria y fichas por rareza';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}
@@ -244,7 +244,7 @@ async function exportSave() {
 
 // ================= HUB =================
 let curView = 'map';
-const NAV_CAMP = [['map', MEGA ? 'Entrenadores' : 'Mapa'], ['shop', 'Tienda'], ['coll', 'Colección'], ['decks', 'Mazos'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']];
+const NAV_CAMP = [['map', MEGA ? 'Entrenadores' : 'Mapa'], ['shop', 'Tienda'], ['coll', 'Colección'], ...(MEGA ? [['tokens', 'Fichas']] : []), ['decks', 'Mazos'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']];
 const NAV_MODE = { camp: NAV_CAMP, packs: [['shop', 'Abrir sobres'], ['coll', 'Colección'], ['opts', 'Opciones']], free: [['meta', 'Mazos meta'], ['decks', 'Mazos'], ['coll', 'Colección'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']] };
 const DEF_VIEW = { camp: 'map', packs: 'shop', free: 'meta' };
 function showHub(view) {
@@ -262,7 +262,7 @@ function renderTop() {
   $('#money').textContent = `₽ ${S.money.toLocaleString('es-CL')}`;
 }
 const packCount = () => Object.values(S.packs).reduce((a, b) => a + b, 0);
-function renderView() { const v = $('#view'); v.innerHTML = ''; ({ meta: viewMeta, map: MEGA ? viewTrainers : viewMap, shop: MODE === 'packs' ? viewPackShop : viewShop, coll: viewColl, decks: viewDecks, online: viewOnline, coins: viewCoins, opts: viewOpts })[curView](v); }
+function renderView() { const v = $('#view'); v.innerHTML = ''; ({ tokens: viewTokens, meta: viewMeta, map: MEGA ? viewTrainers : viewMap, shop: MODE === 'packs' ? viewPackShop : viewShop, coll: viewColl, decks: viewDecks, online: viewOnline, coins: viewCoins, opts: viewOpts })[curView](v); }
 
 // ---------- mapa ----------
 const LAND = {
@@ -315,6 +315,64 @@ function pickEra(id) {
   try { localStorage.setItem('ptcg_era', id); sessionStorage.setItem('ptcg_era_ok', '1'); } catch (e) {}
   if (id !== ERA) { const u = new URL(location.href); u.searchParams.delete('era'); location.replace(u.toString()); return; }
   S = null; start();
+}
+// ---------- fichas por rareza (sólo era Mega, campaña) ----------
+const TOKEN_RARS = ['C', 'U', 'R', 'RR', 'IR', 'UR', 'SIR', 'MAR', 'MHR'];
+let tokTab = 'give', tokRar = 'C', tokQ = '', tokSet = 'all';
+function tokenOk(d) { return d && d.era === 'mega' && d.rar !== 'E' && TOKEN_RARS.includes(d.rar) && !(d.st === 'E' && d.basic); }
+function viewTokens(v) {
+  S.tokens = S.tokens || {};
+  const wrap = el('div', { style: 'max-width:1340px;margin:0 auto;display:flex;flex-direction:column;gap:14px' });
+  const bal = el('div', { class: 'tokbal' });
+  for (const r of TOKEN_RARS) bal.append(el('button', { class: 'tok' + (tokRar === r ? ' on' : ''), title: RARES[r], onclick: () => { tokRar = r; renderView(); } }, el('span', { class: 'rs' }, RSYM[r]), el('b', {}, S.tokens[r] || 0), el('span', { class: 'rn' }, RARES[r])));
+  wrap.append(el('div', { class: 'panel' }, el('h2', { class: 'cond', style: 'color:var(--gold);font-size:24px' }, 'Fichas'),
+    el('p', { class: 'muted', style: 'font-size:13.5px;margin:4px 0 10px' }, 'Cambia cartas de tu colección por una ficha de su misma rareza, y canjea fichas por la carta que quieras de esa rareza (1 carta = 1 ficha). Sólo puedes entregar copias que no estén en tus mazos, y sólo puedes pedir cartas de sets ya desbloqueados en la tienda.'),
+    bal,
+    el('div', { class: 'row', style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px' },
+      el('button', { class: tokTab === 'give' ? 'primary' : '', onclick: () => { tokTab = 'give'; renderView(); } }, '⇩ Cartas → Fichas'),
+      el('button', { class: tokTab === 'get' ? 'primary' : '', onclick: () => { tokTab = 'get'; renderView(); } }, '⇧ Fichas → Cartas'))));
+  // filtros
+  const q = el('input', { placeholder: 'Buscar carta…', value: tokQ, style: 'min-width:180px', oninput: () => { tokQ = q.value.toLowerCase(); draw(); } });
+  const setSel = el('select', { onchange: () => { tokSet = setSel.value; draw(); } }, el('option', { value: 'all' }, 'Todos los sets'), ...C.SETS.map(st => el('option', { value: st.id, selected: tokSet === st.id ? true : null }, st.name)));
+  const tools = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, el('b', { class: 'cond', style: 'font-size:18px' }, `${RSYM[tokRar]} ${RARES[tokRar]}`), q, setSel);
+  const grid = el('div', { class: 'grid' }); const info = el('div', { class: 'muted', style: 'font-size:13px' });
+  if (tokTab === 'give') {
+    const dupBtn = el('button', { onclick: () => giveDuplicates(tokRar) }, `Cambiar todos los duplicados ${RSYM[tokRar]} (dejar 4 de cada carta)`);
+    tools.append(dupBtn);
+  }
+  const match = d => d.rar === tokRar && tokenOk(d) && (tokSet === 'all' || d.set === tokSet) && (!tokQ || d.nameEs.toLowerCase().includes(tokQ) || d.name.toLowerCase().includes(tokQ));
+  const draw = () => {
+    grid.innerHTML = '';
+    if (tokTab === 'give') {
+      const list = P.CARDS.filter(d => match(d) && spare(d.id) > 0);
+      info.textContent = list.length ? `Haz clic en una carta para entregar 1 copia a cambio de 1 ficha ${RSYM[tokRar]}. El número es cuántas copias puedes entregar.` : 'No tienes copias libres de esta rareza (las que están en tus mazos no se pueden entregar).';
+      for (const d of list) { const c = cardEl(d.id); c.append(el('span', { class: 'cnt' }, '×' + spare(d.id))); c.style.cursor = 'pointer'; c.onclick = () => giveCard(d.id); grid.append(c); }
+    } else {
+      const have = S.tokens[tokRar] || 0;
+      const list = P.CARDS.filter(d => match(d) && !setLocked(C.SETS.find(x => x.id === d.set) || { tier: 0 }));
+      info.textContent = have ? `Tienes ${have} ficha(s) ${RSYM[tokRar]}: haz clic en una carta para canjearla. El número es cuántas copias ya tienes.` : `No tienes fichas ${RSYM[tokRar]}. Consíguelas entregando cartas de esta rareza.`;
+      for (const d of list) { const c = cardEl(d.id, { cls: S.coll[d.id] ? '' : 'unowned' }); c.append(el('span', { class: 'cnt' }, '×' + (S.coll[d.id] || 0))); if (!have) c.style.opacity = .5; c.style.cursor = have ? 'pointer' : 'not-allowed'; c.onclick = () => getCard(d.id); grid.append(c); }
+    }
+  };
+  wrap.append(el('div', { class: 'panel', style: 'display:flex;flex-direction:column;gap:10px' }, tools, info, grid));
+  v.append(wrap); draw();
+}
+function giveCard(id) {
+  const d = DB[id]; if (!tokenOk(d) || spare(id) <= 0) return toast('Esa copia está en uso en un mazo.');
+  showModal('Cambiar por ficha', el('div', { style: 'display:flex;gap:14px;align-items:center' }, cardEl(id), el('div', {}, el('p', {}, `Entregas 1 copia de `, el('b', {}, d.nameEs), ` y recibes 1 ficha ${RSYM[d.rar]} ${RARES[d.rar]}.`), el('p', { class: 'muted', style: 'font-size:13px' }, `Te quedarán ${S.coll[id] - 1} copia(s).`))),
+    [{ t: 'Cancelar' }, { t: 'Cambiar', cls: 'primary', f: () => { if (spare(id) <= 0) return; S.coll[id]--; if (!S.coll[id]) delete S.coll[id]; S.tokens[d.rar] = (S.tokens[d.rar] || 0) + 1; save(); renderTop(); renderView(); toast(`+1 ficha ${RSYM[d.rar]} ${RARES[d.rar]}`); } }]);
+}
+function giveDuplicates(r) {
+  const list = P.CARDS.filter(d => d.rar === r && tokenOk(d)).map(d => [d, Math.min(spare(d.id), (S.coll[d.id] || 0) - 4)]).filter(([, n]) => n > 0);
+  const n = list.reduce((a, [, k]) => a + k, 0);
+  if (!n) return toast(`No tienes más de 4 copias libres de ninguna carta ${RSYM[r]}.`);
+  showModal('Cambiar duplicados', el('div', {}, el('p', {}, `Entregas ${n} carta(s) ${RARES[r]} (te quedas con 4 copias de cada una) y recibes ${n} ficha(s) ${RSYM[r]}.`), el('div', { class: 'muted', style: 'font-size:13px;max-height:180px;overflow:auto' }, list.map(([d, k]) => `${k}× ${d.nameEs}`).join(' · '))),
+    [{ t: 'Cancelar' }, { t: `Cambiar ${n}`, cls: 'primary', f: () => { for (const [d, k] of list) { S.coll[d.id] -= k; } S.tokens[r] = (S.tokens[r] || 0) + n; save(); renderTop(); renderView(); toast(`+${n} fichas ${RSYM[r]}`); } }]);
+}
+function getCard(id) {
+  const d = DB[id]; if (!tokenOk(d)) return; if (!(S.tokens[d.rar] > 0)) return toast(`Necesitas 1 ficha ${RSYM[d.rar]} ${RARES[d.rar]}.`);
+  showModal('Canjear ficha', el('div', { style: 'display:flex;gap:14px;align-items:center' }, cardEl(id), el('div', {}, el('p', {}, `Gastas 1 ficha ${RSYM[d.rar]} y recibes `, el('b', {}, d.nameEs), '.'), el('p', { class: 'muted', style: 'font-size:13px' }, `Ya tienes ${S.coll[id] || 0} copia(s). Te quedarán ${S.tokens[d.rar] - 1} ficha(s).`))),
+    [{ t: 'Cancelar' }, { t: 'Canjear', cls: 'primary', f: () => { if (!(S.tokens[d.rar] > 0)) return; S.tokens[d.rar]--; addCards([id]); save(); renderTop(); renderView(); toast(`¡${d.nameEs} añadida a tu colección!`); } }]);
 }
 // ---------- modos: Abrir sobres / Todas las cartas ----------
 function modeInfo(m) { const d = lsGet(m); if (!d || !d.name) return 'Sin empezar'; if (m === 'packs') return `${(d.stats && d.stats.opened) || 0} sobres abiertos · ${P.CARDS.filter(c => d.coll[c.id]).length}/${P.CARDS.length} cartas`; return `${Object.values(d.metaRec || {}).reduce((a, r) => a + r.w, 0)} victorias contra mazos meta`; }
@@ -420,7 +478,7 @@ function viewTrainers(v) {
   wrap.append(el('div', { class: 'panel' }, el('h2', { class: 'cond', style: 'color:var(--gold);font-size:24px' }, 'Entrenadores'), el('p', { class: 'muted', style: 'font-size:13.5px;margin-top:4px' }, 'Vence a todos los entrenadores de un nivel para desbloquear el siguiente. Cada nivel trae mazos más fuertes (Pokémon ex y Megaevolución ex) y mejores premios. En la era Mega quien empieza no puede atacar ni jugar Partidarios en su primer turno.')));
   C.TIERS.forEach((tier, i) => {
     const open = C.tierOpen(S, i); const n = tier.list.filter(t => S.beaten[t.id]).length;
-    const box = el('div', { class: 'panel tier' + (open ? '' : ' locked') }, el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px' }, el('h3', { class: 'cond', style: 'font-size:20px;color:var(--gold)' }, `${open ? '' : '🔒 '}Nivel ${i + 1} · ${tier.name}`), el('span', { class: n === tier.list.length ? 'good' : 'muted' }, `${n}/${tier.list.length} vencidos`)));
+    const box = el('div', { class: 'panel tier' + (open ? '' : ' locked') }, el('div', { style: 'display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px' }, el('h3', { class: 'cond', style: 'font-size:20px;color:var(--gold)' }, `${open ? '' : '🔒 '}Nivel ${i + 1} · ${tier.name}`, el('span', { class: 'muted', style: 'font-size:13px;margin-left:10px' }, `Premio ₽${300 + 100 * i} por victoria (₽${Math.round((300 + 100 * i) * 1.5)} la primera)`)), el('span', { class: n === tier.list.length ? 'good' : 'muted' }, `${n}/${tier.list.length} vencidos`)));
     if (!open) box.append(el('div', { class: 'bad', style: 'margin:6px 0' }, `Vence a todos los entrenadores de «${C.TIERS[i - 1].name}» para desbloquear este nivel.`));
     const list = el('div', { class: 'tlist' });
     for (const t of tier.list) { const row = oppRow({ name: t.name, portrait: t.portrait, level: t.level, types: t.types }, () => open ? preBattle({ kind: 'mega', t }) : toast('Ese nivel todavía está bloqueado.'), S.beaten[t.id] ? `✔ Vencido ×${S.beaten[t.id]}${t.champion ? ' · 👑' : ''}` : `«${t.quote}»`); if (!open) row.querySelector('button.primary').disabled = true; list.append(row); }
@@ -434,7 +492,7 @@ function endBattleMega(w) {
   const before = C.curTier(S); const first = !S.beaten[t.id];
   if (win) {
     S.stats.wins++; S.beaten[t.id] = (S.beaten[t.id] || 0) + 1;
-    money = first ? 80 * t.level + (t.champion ? 3000 : 0) : 30 * t.level;
+    { const base = 300 + 100 * (t.tier || 0); money = first ? Math.round(base * 1.5) + (t.champion ? 3000 : 0) : base; } // era Mega: ₽300 en el nivel 1 y +₽100 por cada nivel (la primera victoria paga 50% más)
     const sets = C.SETS.filter(s => !setLocked(s)); const st = sets[Math.floor(Math.random() * sets.length)] || C.SETS[0];
     if (first) packs[st.id] = t.champion ? 5 : t.level >= 4 ? 2 : 1; else if (Math.random() < 0.3) packs[st.id] = 1;
     if (t.champion && first) rewards.push({ txt: '👑 ¡Eres el nuevo Campeón de la Liga Mega!' });

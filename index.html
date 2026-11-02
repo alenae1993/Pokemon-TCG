@@ -61,6 +61,13 @@
 @keyframes fxhit { 0% { transform: none; filter: brightness(2.2) saturate(.3); } 30% { transform: translateX(-5px); } 60% { transform: translateX(4px); } 100% { transform: none; filter: none; } }
 @keyframes fxglow { 0% { box-shadow: 0 0 0 0 rgba(255,216,77,.9); } 100% { box-shadow: 0 0 0 18px rgba(255,216,77,0); } }
 @keyframes fxevo { 0% { filter: brightness(3); } 100% { filter: none; } }
+
+.tokbal { display: flex; gap: 8px; flex-wrap: wrap; }
+.tokbal .tok { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 92px; padding: 8px 10px; border-radius: 10px; }
+.tokbal .tok.on { outline: 2px solid var(--gold); background: rgba(255,214,90,.12); }
+.tokbal .tok .rs { font-size: 15px; color: var(--gold); }
+.tokbal .tok b { font-size: 22px; }
+.tokbal .tok .rn { font-size: 11px; opacity: .8; text-align: center; }
 </style>
 <title>Liga Kanto TCG</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
