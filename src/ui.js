@@ -15,7 +15,7 @@ if (MEGA) { try { document.querySelector('#topbar .brand').textContent = 'LIGA M
 const ENERGY_BASIC = MEGA ? C.ENERGY_BASIC : ['base1-99', 'base1-98', 'base1-102', 'base1-100', 'base1-101', 'base1-97'];
 const ENERGY_ID = MEGA ? C.ENERGY_ID : P.Decks.ENERGY_ID;
 const STAGE = ['Básico', 'Fase 1', 'Fase 2'];
-const APP_VERSION = 'v17 · Avisos de combate (turnos, energía, entrenadores, ataques, premios y efectos)';
+const APP_VERSION = 'v18 · Animaciones de combate estilo Pokémon TCG Live';
 async function forceUpdate() {
   toast('Buscando la versión más nueva…', 2500);
   try { if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); for (const r of rs) await r.unregister(); } } catch (e) {}
@@ -248,7 +248,7 @@ const NAV_CAMP = [['map', MEGA ? 'Entrenadores' : 'Mapa'], ['shop', 'Tienda'], [
 const NAV_MODE = { camp: NAV_CAMP, packs: [['shop', 'Abrir sobres'], ['coll', 'Colección'], ['opts', 'Opciones']], free: [['meta', 'Mazos meta'], ['decks', 'Mazos'], ['coll', 'Colección'], ['online', 'En línea'], ['coins', 'Monedas'], ['opts', 'Opciones']] };
 const DEF_VIEW = { camp: 'map', packs: 'shop', free: 'meta' };
 function showHub(view) {
-  { const nb = document.getElementById('notif'); if (nb) nb.innerHTML = ''; }
+  { const nb = document.getElementById('fxlayer'); if (nb) nb.innerHTML = ''; }
   for (const s of document.querySelectorAll('.screen')) s.hidden = true;
   $('#hubscreen').hidden = false; if (view) curView = view; renderTop(); renderView();
 }
@@ -729,7 +729,7 @@ function viewOpts(v) {
   v.append(el('div', { class: 'panel', style: 'max-width:640px;display:flex;flex-direction:column;gap:12px' },
     el('h2', { class: 'cond', style: 'color:var(--gold)' }, 'Opciones'),
     el('label', { for: 'speed' }, 'Velocidad de la IA y las monedas: ', sp),
-    el('label', { for: 'notifsel' }, 'Avisos en combate: ', (() => { const ns = el('select', { id: 'notifsel', onchange: () => { S.opts.notif = ns.value; save(); } }, ...[['all', 'Todos los eventos'], ['key', 'Sólo los importantes'], ['off', 'Desactivados']].map(([x, t]) => el('option', { value: x, selected: ((S.opts.notif || 'all') === x) ? true : null }, t))); return ns; })()),
+    el('label', { for: 'animsel' }, 'Animaciones de combate: ', (() => { const ns = el('select', { id: 'animsel', onchange: () => { S.opts.anim = ns.value; save(); } }, ...[['full', 'Completas (estilo TCG Live)'], ['fast', 'Rápidas'], ['off', 'Desactivadas']].map(([x, t]) => el('option', { value: x, selected: ((S.opts.anim || 'full') === x) ? true : null }, t))); return ns; })()),
     el('div', {}, `Entrenador: ${S.name} · Victorias: ${S.stats.wins} · Derrotas: ${S.stats.losses}${S.champion ? ' · 👑 Campeón' : ''}`),
     el('div', { class: 'muted', style: 'font-size:13px' }, 'Versión del juego: ', el('b', { style: 'color:var(--gold)' }, APP_VERSION)),
     !window.claude ? el('div', {}, el('button', { onclick: forceUpdate }, '🔄 Buscar actualización')) : null,
@@ -785,7 +785,7 @@ function speed() { return (S && S.opts.speed) || 1; }
 function startBattle(spec, myDeck) {
   for (const s of document.querySelectorAll('.screen')) s.hidden = true;
   $('#battle').hidden = false; $('#log').innerHTML = '';
-  BT.spec = spec; BT.sel = null; BT.ask = null; BT.me = 0; BT.online = false;
+  BT.spec = spec; BT.sel = null; BT.ask = null; BT.me = 0; BT.online = false; BT.prevSlots = null;
   const opp = spec.opp;
   const aiLvl = MEGA ? Math.min(3, Math.max(1, Math.ceil(opp.level / 2) + (opp.level >= 4 ? 1 : 0))) : Math.min(3, Math.max(1, Math.ceil(opp.level / 2) + (spec.kind === 'leader' || spec.kind === 'league' || (spec.t && (spec.t.boss || spec.t.rival)) ? 1 : 0)));
   const g = new P.Game({ modern: MEGA, ai: P.AI, players: [{ name: S.name, deck: myDeck.slice(), coin: S.coin }, { name: opp.name, deck: opp.deck, ai: { level: aiLvl }, perk: opp.perk, coin: Math.floor(Math.random() * COIN_COUNT) }], io: IO });
@@ -793,52 +793,137 @@ function startBattle(spec, myDeck) {
   BT.g = g; render();
   g.run().then(w => spec.kind === 'meta' ? endBattleMeta(w) : MEGA ? endBattleMega(w) : endBattle(w)).catch(e => { console.error(e); toast('Error en la partida: ' + e.message, 5000); });
 }
-// ---------- avisos de combate ----------
+// ---------- animaciones de combate (estilo Pokémon TCG Live) ----------
 const SUBES = { Item: 'Objeto', Supporter: 'Partidario', Stadium: 'Estadio', 'Pokémon Tool': 'Herramienta', 'Technical Machine': 'MT' };
-const NOTIF_RULES = [
-  [/^— Turno/, 'turn'], [/^⏹/, 'end', '⏹️', 'Fin de turno'], [/^🏆/, 'win', '🏆', 'Fin de la partida'], [/^🪙|^🎲/, 'coin'],
-  [/^💥|Fuera de Combate/, 'ko', '☠️', 'Fuera de Combate'], [/de Premio/, 'prize', '🏅', 'Cartas de Premio'],
-  [/^⚔️/, 'atk', '⚔️', 'Ataque'],
-  [/[Ss]e descartan? .*Energ|descarta .*Energ/, 'edisc', '🔻', 'Energía descartada'],
-  [/no podrá|no puede|bloquea|protegido|no recibirá/, 'lock', '⛔', 'Efecto'],
-  [/une .*Energía|Energía.* (se une|pasa) a|Energías? .*(a la mano|al mazo|a la Banca)|mueve .*Energía/, 'energy', '⚡', 'Energía'],
-  [/ se une a /, 'tool', '🛠️', 'Herramienta'],
-  [/ juega /, 'trainer', '🃏', 'Entrenador'],
-  [/usa la habilidad|usa el Poder/, 'ability', '🔮', 'Habilidad'],
-  [/evoluciona|involuciona/, 'evolve', '✨', 'Evolución'],
-  [/roba \d+|roba \w+ carta|pone .* en su mano|vuelven? a (su |la )?mano/, 'draw', '🎴', 'Cartas a la mano'],
-  [/pasa a ser Activo|se retira/, 'switch', '🔄', 'Cambio de Activo'],
-  [/pone a .* en (juego|su Banca)/, 'bench', '📥', 'Pokémon en juego'],
-  [/de daño|contador/, 'damage', '💥', 'Daño'],
-  [/se cura|se recupera/, 'heal', '💚', 'Curación'],
-  [/ahora está|ya no está|Dormido|Paralizad|Confundid|Envenenad|Quemad/, 'status', '🌀', 'Estado especial'],
-  [/[Ee]stadio/, 'stadium', '🏟️', 'Estadio'],
-  [/descarta|Se descarta/, 'discard', '🗑️', 'Descarte'],
-  [/mazo/, 'deck', '📚', 'Mazo'],
-];
-const NOTIF_KEY = new Set(['turn', 'end', 'win', 'ko', 'prize', 'atk', 'energy', 'edisc', 'tool', 'trainer', 'ability', 'evolve', 'stadium']);
-function notifBox() { let b = $('#notif'); if (!b) { b = el('div', { id: 'notif', 'aria-live': 'polite' }); document.body.append(b); } return b; }
-function notify(g, m) {
-  const mode = (S && S.opts.notif) || 'all'; if (mode === 'off' || $('#battle').hidden) return;
-  const r = NOTIF_RULES.find(([re]) => re.test(m)) || [null, 'fx', '🔹', 'Efecto'];
-  let [, cat, icon, label] = r;
-  if (cat === 'coin') return; // las monedas ya tienen su animación
-  if (mode === 'key' && !NOTIF_KEY.has(cat)) return;
-  const mine = g.cur === ME();
-  if (cat === 'turn') {
-    const who = g.p[g.cur]; const t = el('div', { class: 'turnban ' + (mine ? 'me' : 'opp') }, mine ? '🔔 ¡Tu turno!' : `⏳ Turno de ${who.name}`, el('small', {}, `Turno ${g.turnNo}`));
-    document.body.append(t); setTimeout(() => t.classList.add('out'), 1100 * Math.max(0.6, speed())); setTimeout(() => t.remove(), 1500 * Math.max(0.6, speed())); return;
-  }
-  if (cat === 'trainer') { const nm = (m.match(/ juega (.+?)\.?$/) || [])[1]; const d = nm && P.CARDS.find(x => x.nameEs === nm && x.st === 'T'); if (d && d.sub && SUBES[d.sub[0]]) { label = SUBES[d.sub[0]]; icon = { Objeto: '🎒', Partidario: '🧑', Estadio: '🏟️', Herramienta: '🛠️', MT: '💿' }[label] || icon; } }
-  const txt = m.replace(/^(⚔️|💥|🏆|⏹|🛡|🎴|✨|🔮|⛔)\s*/u, '');
-  const box = notifBox();
-  const n = el('div', { class: `nt ${mine ? 'me' : 'opp'} c-${cat}` }, el('span', { class: 'ic' }, icon), el('div', {}, el('b', {}, label), el('span', {}, txt)));
-  box.append(n); while (box.children.length > 5) box.firstChild.remove();
-  const life = (['ko', 'prize', 'atk', 'win'].includes(cat) ? 3600 : 2600) * Math.max(0.7, speed());
-  setTimeout(() => n.classList.add('out'), life); setTimeout(() => n.remove(), life + 400);
+const STES = { asleep: 'Dormido', paralyzed: 'Paralizado', confused: 'Confundido', poisoned: 'Envenenado', burned: 'Quemado' };
+const animMode = () => (S && S.opts.anim) || 'full';
+const AS = () => speed() * (animMode() === 'fast' ? 0.55 : 1);
+function fxLayer() { let l = $('#fxlayer'); if (!l) { l = el('div', { id: 'fxlayer' }); document.body.append(l); } return l; }
+// espera que se puede saltar con un clic
+function hold(ms, node) { return new Promise(res => { let done = false; const fin = () => { if (!done) { done = true; res(); } }; setTimeout(fin, ms); if (node) node.addEventListener('pointerdown', fin, { once: true }); }); }
+const rectOf = e => e && e.getBoundingClientRect();
+const slotNode = s => s && document.querySelector(`[data-slot="${s.u}"]`);
+const sideSel = mine => `.half.${mine ? 'me' : 'opp'}`;
+const pileNode = (mine, k) => { const p = document.querySelector(`${sideSel(mine)} .piles`); return p && p.children[k]; };
+const handNode = mine => mine ? $('#hand') : document.querySelector('.half.opp .opp-hand') || document.querySelector('.half.opp .who');
+const prizeNode = mine => document.querySelector(`${sideSel(mine)} .prizes`);
+function subLabel(id) { const d = DB[id]; if (!d) return ''; if (d.st === 'T') return (d.sub && SUBES[d.sub[0]]) || 'Entrenador'; if (d.st === 'E') return 'Energía'; return 'Pokémon'; }
+// mueve un nodo fijo hacia el centro de otro elemento
+async function flyTo(node, target, ms, scale = 0.35) {
+  const r = rectOf(target); if (!r) { node.style.opacity = '0'; await sleep(ms); return; }
+  const n = rectOf(node); const dx = r.left + r.width / 2 - (n.left + n.width / 2), dy = r.top + r.height / 2 - (n.top + n.height / 2);
+  node.style.transition = `transform ${ms}ms cubic-bezier(.5,0,.75,0), opacity ${ms}ms ease-in`;
+  node.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`; node.style.opacity = '.15';
+  await sleep(ms);
 }
+// carta grande en el centro: "El rival juega…"
+async function spotlight(id, kicker, title, ms, target, mine) {
+  const L = fxLayer();
+  const dim = el('div', { class: 'fx-dim' });
+  const box = el('div', { class: 'fx-spot ' + (mine ? 'me' : 'opp') }, el('div', { class: 'fx-kicker' }, kicker), el('div', { class: 'fx-card' }, cardEl(id, { holo: true })), el('div', { class: 'fx-title' }, title));
+  L.append(dim, box);
+  await hold(ms * AS(), box);
+  dim.classList.add('out');
+  await flyTo(box, target, 320 * AS(), 0.3);
+  dim.remove(); box.remove();
+}
+// carta pequeña que viaja de un punto a otro
+async function flyCard(id, from, to, ms, label) {
+  const L = fxLayer(); const r = rectOf(from) || { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0 };
+  const node = el('div', { class: 'fx-fly' }, id ? cardEl(id) : backEl(), label ? el('span', { class: 'fx-flylab' }, label) : null);
+  node.style.left = (r.left + r.width / 2 - 45) + 'px'; node.style.top = (r.top + r.height / 2 - 63) + 'px';
+  L.append(node); await sleep(30);
+  await flyTo(node, to, ms, 0.6); node.remove();
+}
+// franja horizontal (turno, ataque, habilidad)
+async function band(cls, content, ms) {
+  const L = fxLayer(); const b = el('div', { class: 'fx-band ' + cls }, ...content);
+  L.append(b); await hold(ms * AS(), b); b.classList.add('out'); await sleep(260 * AS()); b.remove();
+}
+function floatText(target, text, cls) {
+  const r = rectOf(target); if (!r) return;
+  const f = el('div', { class: 'fx-float ' + cls }, text);
+  f.style.left = (r.left + r.width / 2) + 'px'; f.style.top = (r.top + r.height * 0.42) + 'px';
+  fxLayer().append(f); setTimeout(() => f.remove(), 1700 * Math.max(0.6, AS()));
+}
+// diferencias entre renders: daño, curación y estados flotando sobre el Pokémon
+function diffFloats(g) {
+  const prev = BT.prevSlots || new Map(); const next = new Map();
+  for (const s of g.allSlots()) {
+    const st = { dmg: s.dmg, st: s.st, poison: s.poison, burn: s.burn, e: s.energy.length };
+    next.set(s.u, st); const o = prev.get(s.u); if (!o || animMode() === 'off') continue;
+    const node = slotNode(s); if (!node) continue;
+    if (s.dmg > o.dmg) { floatText(node, `-${s.dmg - o.dmg}`, 'dmg'); node.classList.remove('fx-hit'); void node.offsetWidth; node.classList.add('fx-hit'); }
+    else if (s.dmg < o.dmg) floatText(node, `+${o.dmg - s.dmg}`, 'heal');
+    if (s.st && s.st !== o.st) setTimeout(() => floatText(node, STES[s.st] || s.st, 'st'), 250);
+    if (s.poison && !o.poison) setTimeout(() => floatText(node, 'Envenenado', 'st psn'), 400);
+    if (s.burn && !o.burn) setTimeout(() => floatText(node, 'Quemado', 'st brn'), 550);
+    if (s.energy.length < o.e) floatText(node, `−${o.e - s.energy.length} Energía`, 'en');
+  }
+  BT.prevSlots = next;
+}
+const IOanim = {
+  async event(g, type, d) {
+    if (!g || $('#battle').hidden || animMode() === 'off' || BT.g !== g) return;
+    const mine = d.p ? d.p.i === ME() : g.cur === ME();
+    const fast = animMode() === 'fast';
+    switch (type) {
+      case 'turn': {
+        render();
+        await band('turn ' + (mine ? 'me' : 'opp'), [el('div', { class: 'fx-bt' }, mine ? 'TU TURNO' : 'TURNO DEL RIVAL'), el('div', { class: 'fx-bs' }, `Turno ${g.turnNo} · ${d.p.name}`)], mine ? 900 : 800);
+        return;
+      }
+      case 'trainer': {
+        if (mine && fast) return;
+        const sub = subLabel(d.c.d); render();
+        const target = sub === 'Estadio' ? $('#stadium') : pileNode(mine, 1);
+        await spotlight(d.c.d, mine ? `Juegas · ${sub}` : `${d.p.name} juega · ${sub}`, nm(d.c.d), mine ? 650 : 1300, target, mine);
+        return;
+      }
+      case 'tool': { render(); if (!mine) await spotlight(d.c.d, `${d.p.name} une una Herramienta`, `${nm(d.c.d)} → ${g.nm(d.slot)}`, fast ? 600 : 1100, slotNode(d.slot), mine); return; }
+      case 'energy': {
+        render(); const to = slotNode(d.slot);
+        if (mine) { if (to) { to.classList.remove('fx-glow'); void to.offsetWidth; to.classList.add('fx-glow'); } return; }
+        await flyCard(d.c.d, handNode(false), to, 520 * AS(), 'Energía');
+        if (to) { to.classList.remove('fx-glow'); void to.offsetWidth; to.classList.add('fx-glow'); }
+        await sleep(200 * AS()); return;
+      }
+      case 'bench': { if (mine || g.turnNo === 0) return; render(); await flyCard(d.c.d, handNode(false), slotNode(d.slot), 480 * AS()); return; }
+      case 'evolve': {
+        render(); const to = slotNode(d.slot);
+        await spotlight(d.c.d, mine ? '¡Evolución!' : `${d.p.name}: ¡evolución!`, nm(d.c.d), mine ? 650 : 1100, to, mine);
+        render(); const t2 = slotNode(d.slot); if (t2) t2.classList.add('fx-evo'); return;
+      }
+      case 'ability': {
+        render(); const top = d.slot.cards[d.slot.cards.length - 1];
+        await band('abil ' + (mine ? 'me' : 'opp'), [el('div', { class: 'fx-bcard' }, cardEl(top.d)), el('div', {}, el('div', { class: 'fx-bk' }, d.ability ? 'Habilidad' : 'Poder Pokémon'), el('div', { class: 'fx-bt' }, d.name), el('div', { class: 'fx-bs' }, g.nm(d.slot)))], mine ? 650 : 1050);
+        return;
+      }
+      case 'attack': {
+        render(); const top = d.slot.cards[d.slot.cards.length - 1];
+        await band('atk ' + (mine ? 'me' : 'opp'), [el('div', { class: 'fx-bcard' }, cardEl(top.d)), el('div', {}, el('div', { class: 'fx-bk' }, g.nm(d.slot) + ' usa'), el('div', { class: 'fx-bt' }, d.atk.nameEs), el('div', { class: 'fx-bs' }, costIcons(d.atk.cost), d.atk.dmg ? el('b', { class: 'fx-dmg' }, ' ' + d.atk.dmg) : null))], mine ? 750 : 1100);
+        return;
+      }
+      case 'ko': {
+        render(); const n = slotNode(d.slot); if (!n) return;
+        n.classList.add('fx-ko'); const r = rectOf(n); const st = el('div', { class: 'fx-kostamp' }, 'K.O.'); st.style.left = (r.left + r.width / 2) + 'px'; st.style.top = (r.top + r.height / 2) + 'px'; fxLayer().append(st);
+        await sleep(900 * AS()); st.remove(); return;
+      }
+      case 'prize': {
+        render(); const from = prizeNode(mine), to = handNode(mine);
+        await Promise.all(Array.from({ length: Math.min(3, d.n) }, (_, k) => sleep(k * 120 * AS()).then(() => flyCard(null, from, to, 520 * AS(), k === 0 ? `+${d.n} Premio${d.n > 1 ? 's' : ''}` : null))));
+        return;
+      }
+    }
+  },
+  eventSync(g, type, d) {
+    if (!g || $('#battle').hidden || animMode() === 'off' || BT.g !== g) return;
+    if (type === 'draw') { const mine = d.p.i === ME(); const from = pileNode(mine, 0), to = handNode(mine); if (from && to) flyCard(null, from, to, 420 * AS(), d.n > 1 ? `+${d.n}` : null); }
+  },
+};
 const IO = {
-  log(g, m) { const L = $('#log'); const d = el('div', { class: m.startsWith('—') ? 't' : m.startsWith('💥') ? 'ko' : m.startsWith('🏆') ? 'win' : '' }, m); L.append(d); L.scrollTop = L.scrollHeight; try { notify(g, m); } catch (e) {} },
+  event: (g, t, d) => IOanim.event(g, t, d), eventSync: (g, t, d) => IOanim.eventSync(g, t, d),
+  log(g, m) { const L = $('#log'); const d = el('div', { class: m.startsWith('—') ? 't' : m.startsWith('💥') ? 'ko' : m.startsWith('🏆') ? 'win' : '' }, m); L.append(d); L.scrollTop = L.scrollHeight; },
   update(g) { render(); },
   async aiDelay(ms) { render(); await sleep(ms * speed()); },
   async ask(g, p, req) {
@@ -868,6 +953,7 @@ function render() {
   board.append(half(g, op, true), mid(g), half(g, me, false), handEl(g, me));
   $('#turninfo').textContent = `Turno ${g.turnNo}`;
   if (BT.ask && BT.ask.banner) board.append(BT.ask.banner);
+  try { diffFloats(g); } catch (e) {}
 }
 function slotEl(g, s, isActive, owner) {
   BT.slotMap[s.u] = s;
@@ -1302,7 +1388,7 @@ function startOnline(o) {
   document.querySelectorAll('.modal-bg').forEach(m => m.remove());
   for (const s of document.querySelectorAll('.screen')) s.hidden = true;
   $('#battle').hidden = false; $('#log').innerHTML = ''; const cw = $('#claimwin'); if (cw) cw.remove();
-  BT.spec = { kind: 'online', opp: { name: o.names[1 - o.me], portrait: 'base1-88' } }; BT.sel = null; BT.ask = null; BT.me = o.me; BT.online = true; BT.resolveTurn = null; BT.busy = false;
+  BT.spec = { kind: 'online', opp: { name: o.names[1 - o.me], portrait: 'base1-88' } }; BT.sel = null; BT.ask = null; BT.me = o.me; BT.online = true; BT.prevSlots = null; BT.resolveTurn = null; BT.busy = false;
   const gen = NET.gen;
   const g = new P.Game({ modern: MEGA, rng: P.mkRng(o.seed), uidBase: 1, ai: P.AI, players: [0, 1].map(i => ({ name: o.names[i], deck: o.decks[i].slice(), coin: Math.min(COIN_COUNT - 1, Math.max(0, o.coins[i] | 0)) })), io: IO });
   g.p[1 - o.me].remote = true; g.portrait = 'base1-88';
